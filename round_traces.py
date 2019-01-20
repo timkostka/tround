@@ -576,6 +576,8 @@ def round_signals(filename):
                                    'round_signals.scr')
     # if True, will also round corners of 3+ wire junctions
     rounded_junctions = True
+    # if True, will round corners
+    round_corners = True
     # if True, will enlarge copper traces onto the tPlace plane to help
     # visualize the margin
     # enlarge_to_tplace = True
@@ -587,7 +589,13 @@ def round_signals(filename):
     # else, simple traces will be used
     create_polygons_in_junctions = True
     # if True, create teardrop shapes for vias
-    create_teardrop_vias = not True
+    create_teardrop_vias = False
+    # if True, will snap points close to the grid points
+    snap_to_grid = True
+    # tolerance for snapping points, in inces
+    snap_tolerance_inch= 1e-6
+    # grid spacing in inches
+    grid_spacing_inches = 1e-3
     # minimum path segment to create
     # min_segment_length_mils = 5
     # target inner radius of trace as a ratio of trace width
@@ -1082,12 +1090,14 @@ def round_signals(filename):
         # print(rounded_distance)
         # print(adjacent_point)
     # draw all wires
+    commands.append('change thermals off;')
     for layer in sorted(wires_by_layer.keys()):
         commands.append('layer %s;' % layer)
-        commands.append('change thermals off;')
         commands.extend(sorted(wires_by_layer[layer], key=wire_command_sort))
         # for x in sorted(wires_by_layer[layer], key=wire_command_sort):
         #    print(wire_command_sort(x))
+    # set view on top layer
+    commands.append('change layer 1;')
     # ratsnest to get rid of airwires
     commands.append('grid last;')
     commands.append('optimize;')
@@ -1102,7 +1112,125 @@ def round_signals(filename):
     # print('\n'.join(commands))
 
 
-if True:
+def get_wires_by_signal(filename):
+    """Return the wires sorted by signal from the given file."""
+    tree = ElementTree.parse(filename)
+    root = tree.getroot()
+    wire_by_layer = dict()
+    # store DRU information
+    dru = dict()
+    for signals in root.iter('signals'):
+        for signal in signals.iter('signal'):
+            name = signal.attrib['name']
+            for wire in signal.iter('wire'):
+                pass
+
+
+def snap_wires_to_grid(filename, tolerance_inch=1e-6, spacing_inch=1e-3):
+    """Snap wires to the grid if they are close."""
+    # native resolution in mm
+    native_resolution_mm = 3.125e-6
+    # max digits per coord
+    #decimal_place_resolution = 8
+    # hold commands to redraw all wires
+    commands = []
+    commands.append('set optimizing off;')
+    commands.append('display none;')
+    commands.append('display 1 to 16;')
+    commands.append('group all;')
+    commands.append('ripup (>0 0);')
+    commands.append('display preset_standard;')
+    commands.append('set wire_bend 2;')
+    commands.append('grid mm;')
+    # search through the XML tree
+    tree = ElementTree.parse(filename)
+    root = tree.getroot()
+    wires_by_layer = dict()
+    # store DRU information
+    dru = dict()
+    for signals in root.iter('signals'):
+        for signal in signals.iter('signal'):
+            name = signal.attrib['name']
+            for wire in signal.iter('wire'):
+                x1 = float(wire.attrib['x1'])
+                y1 = float(wire.attrib['y1'])
+                p1 = Point2D(x1, y1)
+                x1 /= mm_per_inch
+                x1 = math.floor(x1 / spacing_inch + 0.5) * spacing_inch
+                x1 *= mm_per_inch
+                y1 /= mm_per_inch
+                y1 = math.floor(y1 / spacing_inch + 0.5) * spacing_inch
+                y1 *= mm_per_inch
+                p1_grid = Point2D(x1, y1)
+                dist = p1.distance_to(p1_grid)
+                if dist / mm_per_inch < tolerance_inch:
+                    p1 = p1_grid
+
+                x2 = float(wire.attrib['x2'])
+                y2 = float(wire.attrib['y2'])
+                p2 = Point2D(x2, y2)
+                x2 /= mm_per_inch
+                x2 = math.floor(x2 / spacing_inch + 0.5) * spacing_inch
+                x2 *= mm_per_inch
+                y2 /= mm_per_inch
+                y2 = math.floor(y2 / spacing_inch + 0.5) * spacing_inch
+                y2 *= mm_per_inch
+                p2_grid = Point2D(x2, y2)
+                dist = p2.distance_to(p2_grid)
+                if dist / mm_per_inch < tolerance_inch:
+                    p2 = p2_grid
+
+                # snap p1 to the native grid
+                x1 = math.floor(p1.x / native_resolution_mm + 0.5) * native_resolution_mm
+                x1 = '%.9f' % x1
+                y1 = math.floor(p1.y / native_resolution_mm + 0.5) * native_resolution_mm
+                y1 = '%.9f' % y1
+                # snap p1 to the native grid
+                x2 = math.floor(p2.x / native_resolution_mm + 0.5) * native_resolution_mm
+                x2 = '%.9f' % x2
+                y2 = math.floor(p2.y / native_resolution_mm + 0.5) * native_resolution_mm
+                y2 = '%.9f' % y2
+
+                if 'curve' in wire.attrib:
+                    curve = wire.attrib['curve'] + ' '
+                else:
+                    curve = ''
+                command = ('wire \'%s\' %s (%s %s) %s(%s %s);'
+                           % (signal.attrib['name'],
+                              wire.attrib['width'],
+                              x1,
+                              y1,
+                              curve,
+                              x2,
+                              y2))
+                if wire.attrib['layer'] not in wires_by_layer:
+                    wires_by_layer[wire.attrib['layer']] = []
+                wires_by_layer[wire.attrib['layer']].append(command)
+    # draw all wires
+    for layer in sorted(wires_by_layer.keys()):
+        commands.append('layer %s;' % layer)
+        commands.extend(sorted(wires_by_layer[layer], key=wire_command_sort))
+        # for x in sorted(wires_by_layer[layer], key=wire_command_sort):
+        #    print(wire_command_sort(x))
+    # set view on top layer
+    commands.append('change layer 1;')
+    commands.append('grid last;')
+    commands.append('optimize;')
+    commands.append('set optimizing on;')
+    commands.append('ratsnest;')
+    commands.append('group (>0 0);')
+    # create script filename
+    script_filename = os.path.join(os.path.dirname(filename),
+                                   'snap_to_grid.scr')
+    with open(script_filename, 'w') as f:
+        f.write('\n'.join(commands))
+    print('\nScript generated at %s' % script_filename)
+
+
+mm_per_inch = 25.4
+
+
+if False:
     libraries = read_libraries(filename)
     parts = read_placements(filename)
     fixed_points = set()
@@ -1129,5 +1257,6 @@ if True:
         f.write('\n'.join(commands))
 
 
-round_signals(filename)
+snap_wires_to_grid(filename)
+#round_signals(filename)
 # delete_via_teardrops(filename)

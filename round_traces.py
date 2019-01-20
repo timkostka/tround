@@ -19,6 +19,8 @@ from point2d import Point2D
 
 # filename to modify
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\round_traces\round_traces_test.brd'
+filename = r'C:\Users\tdkostk\Documents\eagle\projects\micro_ohmmeter\micro_ohmmeter_rev5.brd'
+filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5.brd'
 
 
 class StraightWire:
@@ -544,6 +546,13 @@ def create_teardrop(joining_point,
     # d2 = -ndp + diff
 
 
+def snapped_point(point):
+    """Return the point snapped to the nearest native resoltion."""
+    resolution = 3.125e-6
+    return Point2D(math.floor(point.x / resolution + 0.5) * resolution,
+                   math.floor(point.y / resolution + 0.5) * resolution)
+
+
 def round_signals(filename):
     """
     Create rounded signal lines instead of sharp corners.
@@ -587,6 +596,8 @@ def round_signals(filename):
     # max_trace_deviation_mils = 3
     # minimum length of path segment to keep
     # min_remaining_segment_mils = 5
+    # shortest possible nonzero wire length (native Eagle resolution)
+    native_resolution_mm = 3.125e-6
     # if a wire is shorter than this, ignore it
     length_tolerance_mils = 1e-9 / 0.0254
     # parse the XML file
@@ -630,6 +641,22 @@ def round_signals(filename):
     # locked_points = set(find_all_via_points(filename))
     # hold wires by signal
     # wires_by_signal = dict()
+    base_locked_points = set()
+    # read footprints from board file
+    libraries = read_libraries(filename)
+    # read part placement in board file
+    parts = read_placements(filename)
+    # make smd pads locked points
+    for part in parts:
+        origin = part.origin
+        for point in libraries[part.library][part.footprint]:
+            point = Point2D(point.x, point.y)
+            if part.rotation != 0:
+                point.rotate(part.rotation * math.pi / 180.0)
+            if part.mirrored:
+                point.x = -point.x
+            # snap to grid
+            base_locked_points.add(origin + point)
     # hold wire commands to draw by layer
     wires_by_layer = dict()
     curved_wire_count = 0
@@ -647,7 +674,7 @@ def round_signals(filename):
         # store number of wires at each point and layer
         wires_at_point = dict()
         # hold fixed points (vias, end points)
-        locked_points = set()
+        locked_points = set(base_locked_points)
         # store all straight wires
         wires = list()
         for child in signal:
@@ -803,16 +830,25 @@ def round_signals(filename):
         # (layer, point1, point2)
         # rounded_segment = set()
         # hold adjacent points
+        # print(locked_points)
         # look through all points with exactly 2 wires and try to simplify
         for (layer, point), wire_count in wires_at_point.items():
             # if this point is fixed, don't modify this intersection
-            if point in locked_points:
+            dist = None
+            for p in locked_points:
+                this_dist = point.distance_to(p)
+                if dist is None or this_dist < dist:
+                    dist = this_dist
+            #print(point, dist)
+            if dist < 5 * native_resolution_mm:
+                continue
+            if snapped_point(point) in locked_points:
                 continue
             # if only one wire, don't modify it
             if wire_count == 1:
                 locked_points.add(point)
                 continue
-            # if more than 2 wires intersect here, don't modify it
+            # if more than 2 wires intersect here, mark it as a junction
             if wire_count > 2:
                 junction_points.add((layer, point))
                 continue
@@ -1048,6 +1084,7 @@ def round_signals(filename):
     # draw all wires
     for layer in sorted(wires_by_layer.keys()):
         commands.append('layer %s;' % layer)
+        commands.append('change thermals off;')
         commands.extend(sorted(wires_by_layer[layer], key=wire_command_sort))
         # for x in sorted(wires_by_layer[layer], key=wire_command_sort):
         #    print(wire_command_sort(x))
@@ -1065,21 +1102,32 @@ def round_signals(filename):
     # print('\n'.join(commands))
 
 
-libraries = read_libraries(filename)
-parts = read_placements(filename)
+if True:
+    libraries = read_libraries(filename)
+    parts = read_placements(filename)
+    fixed_points = set()
+    for part in parts:
+        origin = part.origin
+        for point in libraries[part.library][part.footprint]:
+            point = Point2D(point.x, point.y)
+            if part.rotation != 0:
+                point.rotate(part.rotation * math.pi / 180.0)
+            if part.mirrored:
+                point.x = -point.x
+            fixed_points.add(origin + point)
+    commands = []
+    commands.append('display 48;')
+    commands.append('change layer 48;')
+    commands.append('grid mm;')
+    commands.append('change width 0.0254;')
+    radius = 0.010 / 0.0254
+    for p in fixed_points:
+        commands.append(('circle %s %s;' % (p, p + Point2D(radius, 0.0))).replace(',', ''))
+    script_filename = os.path.join(os.path.dirname(filename),
+                                   'show_fixed_points.scr')
+    with open(script_filename, 'w') as f:
+        f.write('\n'.join(commands))
 
-fixed_points = set()
 
-for part in parts:
-    origin = part.origin
-    for point in libraries[part.library][part.footprint]:
-        if part.rotation != 0:
-            point.rotate(part.rotation * math.pi / 180.0)
-        print(part, point)
-        if part.mirrored:
-            point.x = -point.x
-        fixed_points.add(origin + point)
-print(fixed_points)
-
-#round_signals(filename)
+round_signals(filename)
 # delete_via_teardrops(filename)

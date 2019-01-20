@@ -71,7 +71,7 @@ class Point2D:
 
     def distance_to(self, other):
         """Return the distance from this point to the given point."""
-        return Point2D(self - other).norm()
+        return (self - other).norm()
 
     def norm(self):
         """Return the distance from the origin."""
@@ -83,7 +83,6 @@ class Point2D:
         sin = math.sin(angle)
         x, y = self.x, self.y
         self.x, self.y = x * cos - y * sin, y * cos + x * sin
-        return self
 
     def __repr__(self):
         return '(%g, %g)' % (self.x, self.y)

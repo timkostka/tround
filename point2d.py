@@ -11,6 +11,12 @@ class Point2D:
     def dot(self, other):
         return self.x * other.x + self.y * other.y
 
+    def __pos__(self):
+        return Point2D(self.x, self.y)
+
+    def __neg__(self):
+        return Point2D(-self.x, -self.y)
+
     def __add__(self, other):
         return Point2D(self.x + other.x, self.y + other.y)
 

@@ -11,6 +11,7 @@ Process for creating rounded traces:
 """
 
 import os
+import copy
 import pdb
 import math
 from xml.etree import ElementTree
@@ -18,9 +19,11 @@ from xml.etree import ElementTree
 from point2d import Point2D
 
 # filename to modify
+L = []
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\round_traces\round_traces_test.brd'
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\micro_ohmmeter\micro_ohmmeter_rev5.brd'
-filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5.brd'
+#filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5.brd'
+#filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5-rounded.brd'
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\teardrop_vias\teardrop_test.brd'
 
 
@@ -492,46 +495,93 @@ def create_teardrop(joining_point,
     """
     # tangent should point towards the via
     # (but this is not strictly necessary)
-    assert tangent.dot(via_point - joining_point) >= 0.0
     via = via_point - joining_point
+    assert tangent.dot(via) >= 0.0
     # point = point - via_point
     # get direction normal to tangent
     normal = Point2D(tangent.y, -tangent.x)
+    # d1 = (via.dot(via) - radius ** 2) / (via.dot(normal) - radius)
+    # d2 = (via.dot(via) - radius ** 2) / (via.dot(normal) - radius)
     # find d1 and d2
-    d1 = 2.0 * (radius - normal.dot(via))
+    d1 = 2.0 * (normal.dot(via) - radius)
     if d1 == 0.0:
         d1 = 1e100
     else:
-        d1 = (radius ** 2 - via.dot(via)) / d1
-    d2 = -2.0 * (radius + normal.dot(via))
+        d1 = (via.dot(via) - radius ** 2) / d1
+    d2 = 2.0 * (normal.dot(via) + radius)
     if d2 == 0.0:
         d2 = 1e100
     else:
-        d2 = (radius ** 2 - via.dot(via)) / d2
-    angle = math.atan2(via.y, via.x)
-    startAngle1 = angle + math.pi / 2.0
-    startAngle2 = angle + math.pi / 2.0
-    # startAngle3 = angle + math.pi / 2.0
+        d2 = (via.dot(via) - radius ** 2) / d2
+    d3 = 2.0 * via.dot(normal)
+    if d3 == 0:
+        d3 = 1e100
+    else:
+        d3 = via.dot(via) / d3
+    print('\nd1=%s, d2=%s, d3=%s' % (d1, d2, d3))
+    print('t=%s, n=%s' % (tangent, normal))
+    start_angle_1 = via.angle() + math.pi / 2.0
+    start_angle_2 = via.angle() + math.pi / 2.0
+    start_angle_3 = via.angle() + math.pi / 2.0
+    start_angle_1 = tangent.angle() + math.pi / 2.0
+    start_angle_2 = tangent.angle() + math.pi / 2.0
+    start_angle_3 = tangent.angle() + math.pi / 2.0
     if d1 < 0:
-        startAngle1 -= math.pi
+        start_angle_1 -= math.pi
     if d2 < 0:
-        startAngle2 -= math.pi
-    end_angle_1 = (joining_point - d1 * normal - via_point).angle()
-    end_angle_2 = (joining_point - d2 * normal - via_point).angle()
+        start_angle_2 -= math.pi
+    if d3 < 0:
+        start_angle_3 -= math.pi
+    end_angle_1 = (via - d1 * normal).angle()
+    end_angle_2 = (via - d2 * normal).angle()
+    end_angle_3 = (via - d3 * normal).angle()
+    # find point on radius to join to
+    center = joining_point + d1 * normal
     p1 = via_point
-    p1 -= radius * Point2D(math.cos(end_angle_1), math.sin(end_angle_1))
+    if center.distance_to(p1) < abs(d1):
+        p1 = p1 + radius * Point2D(math.cos(end_angle_1), math.sin(end_angle_1))
+    else:
+        p1 = p1 - radius * Point2D(math.cos(end_angle_1), math.sin(end_angle_1))
+    print('d1=%g, dp1=%g' % (d1, center.distance_to(p1)))
+    # find second point on radius to join with
+    center = joining_point + d2 * normal
     p2 = via_point
-    p2 -= radius * Point2D(math.cos(end_angle_2), math.sin(end_angle_2))
+    if center.distance_to(p2) < abs(d2):
+        p2 = p2 + radius * Point2D(math.cos(end_angle_2), math.sin(end_angle_2))
+    else:
+        p2 = p2 - radius * Point2D(math.cos(end_angle_2), math.sin(end_angle_2))
+    print('d2=%g, dp2=%g' % (d2, center.distance_to(p2)))
+    print('ea1=%s, ea2=%s' % (end_angle_1 * 180 / math.pi, end_angle_2 * 180 / math.pi))
+    commands = []
+    #
+    if False:
+        p = joining_point + d1 * normal
+        commands.append('circle 0.05 (%s %s) (%s %s);'
+                        % (format_mm(p.x),
+                           format_mm(p.y),
+                           format_mm(p.x + 0.3),
+                           format_mm(p.y)))
+        p = joining_point + d2 * normal
+        commands.append('circle 0.05 (%s %s) (%s %s);'
+                        % (format_mm(p.x),
+                           format_mm(p.y),
+                           format_mm(p.x + 0.3),
+                           format_mm(p.y)))
     # end_angle_1 = math.atan2(via_point - d1 * normal)
     # end_angle_2 = math.atan2(via_point - d2 * normal)
-    commands = []
     # p3 = via_point
+    a1 = (end_angle_1 - start_angle_1) * 180 / math.pi
+    a1 = ((a1 + 180) % 360) - 180
+    a2 = (end_angle_2 - start_angle_2) * 180 / math.pi
+    a2 = ((a2 + 180) % 360) - 180
+    a3 = (end_angle_3 - start_angle_3) * 180 / math.pi
+    a3 = ((a3 + 180) % 360) - 180
     commands.append('line \'%s\' %s (%s %s) %s (%s %s);'
                     % (signal,
                        width,
                        format_mm(joining_point.x),
                        format_mm(joining_point.y),
-                       format_mm(end_angle_1 - startAngle1, True),
+                       format_mm(a1, True),
                        format_mm(p1.x),
                        format_mm(p1.y)))
     commands.append('line \'%s\' %s (%s %s) %s (%s %s);'
@@ -539,13 +589,21 @@ def create_teardrop(joining_point,
                        width,
                        format_mm(joining_point.x),
                        format_mm(joining_point.y),
-                       format_mm(end_angle_2 - startAngle2, True),
+                       format_mm(a2, True),
                        format_mm(p2.x),
                        format_mm(p2.y)))
+    commands.append('line \'%s\' %s (%s %s) %s (%s %s);'
+                    % (signal,
+                       width,
+                       format_mm(joining_point.x),
+                       format_mm(joining_point.y),
+                       format_mm(a3, True),
+                       format_mm(via_point.x),
+                       format_mm(via_point.y)))
     return commands
     # endAngle3 = math.atan2(via_point - d3 * normal)
     # if d3 < 0:
-    #    startAngle1 -= math.pi
+    #    start_angle_1 -= math.pi
     # get two solutions to the problem
     # p = point + d * normal
     # ||via_point - p|| = r0
@@ -1370,19 +1428,95 @@ class Wire:
         assert self.p2 == point
         return self.p1
 
+    def get_curve_points(self):
+        """Return the center, radius, and starting angle of the curved Wire."""
+        assert self.curve != 0
+        distance = self.p1.distance_to(self.p2)
+        # sin(theta / 2) == (d / 2) / r
+        radius = distance / 2.0 / math.sin(self.curve / 2.0 * math.pi / 180.0)
+        radius = abs(radius)
+        midpoint = self.p1 + 0.5 * (self.p2 - self.p1)
+        normal = (self.p2 - self.p1).rotate(math.pi / 2.0)
+        normal.normalize()
+        delta = radius ** 2 - midpoint.distance_to(self.p2) ** 2
+        if delta < 0.0:
+            delta = 0.0
+        delta = math.sqrt(delta)
+        if self.curve > 0:
+            center = midpoint + normal * delta
+        else:
+            center = midpoint - normal * delta
+        start_angle = center.angle_to(self.p1)
+        return center, radius, start_angle
+
     def get_distance_along(self, alpha):
-        """Return the point alpha percent along the wire."""
+        """
+        Return the point alpha percent along the wire.
+
+        return is point, tangent
+
+        """
         assert 0.0 <= alpha <= 1.0
-        if alpha == 0.0:
-            return self.p1
-        elif alpha == 1.0:
-            return self.p2
+        #if alpha == 0.0:
+        #    return self.p1
+        #elif alpha == 1.0:
+        #    return self.p2
         # process straight line
         if self.curve == 0.0:
-            return self.p1 + alpha * (self.p2 - self.p1)
-        assert False
+            point = self.p1 + alpha * (self.p2 - self.p1)
+            tangent = (self.p2 - self.p1).normalize()
+            return point, tangent
+        #distance = self.p1.distance_to(self.p2)
+        # sin(theta / 2) == (d / 2) / r
+        #radius = distance / 2.0 / math.sin(self.curve * math.pi / 180.0)
+        #midpoint = self.p1 + 0.5 * (self.p2 - self.p1)
+        #normal = (self.p2 - self.p1).rotate(math.pi / 2.0)
+        #delta = radius ** 2 - midpoint.distance_to(self.p2) ** 2
+        #if delta < 0.0:
+        #    delta = 0.0
+        #delta = math.sqrt(delta)
+        #if self.curve > 0:
+        #    center = midpoint + normal * delta
+        #else:
+        #    center = midpoint - normal * delta
+        center, radius, start_angle = self.get_curve_points()
+        #start_angle = center.angle_to(self.p1)
+        angle = start_angle + alpha * self.curve * math.pi / 180
+        point = center + radius * Point2D(math.cos(angle), math.sin(angle))
+        tangent = Point2D(math.cos(angle + math.pi / 2.0),
+                          math.sin(angle + math.pi / 2.0))
+        if self.curve < 0:
+            tangent = -tangent
+        return point, tangent
+
+    def reversed(self):
+        """Return an identical wire with the points reversed."""
+        wire = copy.copy(self)
+        wire.p1, wire.p2 = wire.p2, wire.p1
+        wire.curve = -wire.curve
+        return wire
+
+    def get_length(self):
+        """Return the length of this wire."""
+        if self.curve == 0.0:
+            return self.p1.distance_to(self.p2)
+        _, radius, _ = self.get_curve_points()
+        return radius * abs(self.curve) * math.pi / 180.0
+
+    def get_command(self, signal_name=None):
+        """Return the command to recreate the wire."""
+        command = ('wire \'%s\' %.9f (%.9f %.9f)%s (%.9f %.9f);'
+                   % (signal_name,
+                      self.width,
+                      self.p1.x,
+                      self.p1.y,
+                      '' if self.curve == 0.0 else '%+.3f ' % self.curve,
+                      self.p2.x,
+                      self.p2.y))
+        return command
 
     def __repr__(self):
+        """Return a string representation."""
         args = []
         for attr in dir(self):
             # skip hidden values/functions
@@ -1408,19 +1542,30 @@ def read_wires(filename):
 
 
 def find_point_on_chain(wire_chain, via_point, target_distance):
-    """Return the point and tangent to the given wire chain."""
+    """
+    Return the point and tangent to the given wire chain.
+
+    Return value is (point, tangent), (index, alpha).
+
+    where index is the index of the wire this point belongs to and alpha is
+    the proportion along that index.
+
+    """
     next_point = via_point
+    index = -1
     for wire in wire_chain:
+        index += 1
         next_point = wire.get_other_point(next_point)
         if via_point.distance_to(next_point) < target_distance:
             continue
         backwards = (via_point.distance_to(wire.p1) >
                      via_point.distance_to(wire.p2))
+        assert not backwards
         low = 0.0
         high = 1.0
         while low != high:
             test = (low + high) / 2.0
-            point = wire.get_distance_along(test)
+            point, tangent = wire.get_distance_along(test)
             if test == low or test == high:
                 break
             if via_point.distance_to(point) < target_distance:
@@ -1433,14 +1578,10 @@ def find_point_on_chain(wire_chain, via_point, target_distance):
                     high = test
                 else:
                     low = test
-        # TODO: implement support for curved wires
-        assert wire.curve == 0.0
-        tangent = wire.p1 - wire.p2
-        tangent.normalize()
-        if backwards:
-            tangent = -tangent
-        return point, tangent
-    return None, None
+        # reverse direction of tangent so it points back to start
+        tangent = -tangent
+        return (point, tangent), (index, test)
+    return None
 
 
 def create_teardrop_vias(filename):
@@ -1449,9 +1590,9 @@ def create_teardrop_vias(filename):
     commands = []
     commands.append('set optimizing off;')
     commands.append('display none;')
-    #commands.append('display 1 to 16 18;')
-    #commands.append('group all;')
-    # commands.append('ripup (>0 0);')
+    commands.append('display 1 to 16;')
+    commands.append('group all;')
+    commands.append('ripup (>0 0);')
     commands.append('display preset_standard;')
     commands.append('set wire_bend 2;')
     commands.append('grid mm;')
@@ -1497,6 +1638,9 @@ def create_teardrop_vias(filename):
         wire_by_point[point].append(wire)
         point = (wire.layer, wire.p2)
         wire_by_point[point].append(wire)
+    print('wire_by_point:')
+    for key, value in wire_by_point.items():
+        print('- %s: %s' % (key, value))
     # get map from point to via
     via_at_point = dict()
     for via in vias:
@@ -1505,8 +1649,6 @@ def create_teardrop_vias(filename):
     # figure out wire chains starting at vias
     # wire_chain[(1, Point2D(0, 0))] = [Wire(...), Wire(...)]
     wire_chains = dict()
-    #print(via_points)
-    #print(wires)
     for wire in wires:
         for p in [wire.p1, wire.p2]:
             point = (wire.layer, p)
@@ -1523,36 +1665,131 @@ def create_teardrop_vias(filename):
                 else:
                     assert new_wires[1] == this_chain[-1]
                     this_chain.append(new_wires[0])
-                new_point = this_chain[-1].get_other_point(new_point[1])
+                new_point = (new_point[0], this_chain[-1].get_other_point(new_point[1]))
     print('- Found %d wire chains.' % len(wire_chains))
-    teardrop_inner_diameter_mm = 0.020 * 25.4
+    print('- Wire chain lengths: %s' % [sum(x.get_length() for x in chain)
+                                        for chain in wire_chains.values()])
+    # change wires within each chain such that points are sorted
+    # [wire1, wire2, wire3, ...]
+    # via at wire1.p1 with wire1.p2 == wire2.p1, etc.
+    for via, chain in wire_chains.items():
+        starting_point = via[1]
+        new_chain = []
+        for wire in chain:
+            if wire.p2 == starting_point:
+                wire = wire.reversed()
+            else:
+                assert wire.p1 == starting_point
+            new_chain.append(wire)
+            # print(via, new_chain, starting_point)
+            starting_point = wire.p2
+        wire_chains[via] = new_chain
+    teardrop_inner_diameter_mm = 0.050 * 25.4
+    # for chains which have a via at both ends, delete the second half
+    print(via_points)
+    print(wire_chains.values())
+    for via, chain in wire_chains.items():
+        # if there's not a via at the end, keep the entire chain
+        if chain[-1].p2 not in via_points:
+            continue
+        print('Found chain with vias at each end: %s' % chain)
+        # get total length of chain
+        chain_length = sum(wire.get_length() for wire in chain)
+        assert chain_length > 0.0
+        # find exact midpoint
+        length_so_far = 0.0
+        index = 0
+        while length_so_far + chain[index].get_length() < chain_length / 2.0:
+            length_so_far += chain[index].get_length()
+            index += 1
+        # find proportion along this segment
+        alpha = (chain_length / 2.0 - length_so_far) / chain[index].get_length()
+        if alpha < 0.0:
+            alpha = 0.0
+        elif alpha == 1.0:
+            alpha = 1.0
+        # delete trail of chain
+        if alpha == 0.0:
+            chain[:] = chain[:index]
+        else:
+            chain[:] = chain[:index + 1]
+            chain[-1] = copy.copy(chain[-1])
+            # TODO: support curved wires
+            point, _ = chain[-1].get_distance_along(alpha)
+            # chain[-1].p2 = chain[-1].p1 + alpha * (chain[-1].p2 - chain[-1].p1)
+            chain[-1].p2 = point
+            chain[-1].curve *= alpha
+    print('- Wire chain lengths: %s' % [sum(x.get_length() for x in chain)
+                                        for chain in wire_chains.values()])
+    for x in wire_chains.values():
+        print(x)
+    # the via diameter must be at least this much more than the wire width
+    # in order to create a teardrop via
+    tolerance_mm = 0.1
     # hold wire commands to draw by layer
     wires_by_layer = dict()
     for point, chain in wire_chains.items():
+        print('Processing chain at point %s: %s' % (point, chain))
+
         via_point = point[1]
         wire_width = chain[0].width
         via = via_at_point[via_point]
         via_diameter = via.outer_diameter
+        total_chain_length = sum(x.get_length() for x in chain)
+        print('- Total length: %s' % total_chain_length)
+        # if chain is too short, don't do anything
+        if total_chain_length < via_diameter / 2.0 + tolerance_mm:
+            print('Chain too short: %s' % chain)
+            continue
         # can't teardrop vias if the wires are bigger than the via diameter
-        if via_diameter <= wire_width:
+        if via_diameter <= wire_width + tolerance_mm:
             print('wire at %s too big (%s)' % (via_point, via))
             continue
         r1 = via_diameter / 2.0
         r2 = teardrop_inner_diameter_mm + wire_width / 2.0
         d = math.sqrt((r1 + r2) ** 2 - (r2 + wire_width / 2.0) ** 2)
-        junction_point, tangent = find_point_on_chain(chain, via_point, d)
+        result = find_point_on_chain(chain, via_point, d)
+        print(result)
+        # if chain is not long enough, ignore it
+        if result is None:
+            print('Chain short but usable: %s' % chain)
+            # use end of chain
+            print(chain[-1].get_distance_along(1.0))
+            result = [list(chain[-1].get_distance_along(1.0)), (len(chain) - 1, 1.0)]
+            print(result)
+            print(result)
+            print(result)
+            result[0][1] = -result[0][1]
+            #continue
+        print(result)
+        (junction_point, tangent), (wire_index, alpha) = result
         teardrop_commands = create_teardrop(junction_point,
                                             tangent,
                                             via_point,
                                             (via_diameter - wire_width) / 2.0,
                                             via.signal,
                                             chain[0].width)
+        # delete portion of chain between via and junction point
+        layer = chain[0].layer
+        chain[:] = chain[wire_index:]
+        if alpha == 1.0:
+            chain[:] = chain[1:]
+        elif alpha > 0:
+            point, _ = chain[0].get_distance_along(alpha)
+            chain[0].curve *= 1.0 - alpha
+            chain[0].p1 = point
         for x in teardrop_commands:
             print(x)
-        if chain[0].layer not in wires_by_layer:
-            wires_by_layer[chain[0].layer] = []
-        wires_by_layer[chain[0].layer].extend(teardrop_commands)
+        if layer not in wires_by_layer:
+            wires_by_layer[layer] = []
+        wires_by_layer[layer].extend(teardrop_commands)
         print(via_point, junction_point)
+    # add wires in chains
+    for point, chain in wire_chains.items():
+        if wire.layer not in wires_by_layer:
+            wires_by_layer[wire.layer] = []
+        for wire in chain:
+            wires_by_layer[wire.layer].append(wire.get_command(signal_name=wire.signal))
     for layer in sorted(wires_by_layer.keys()):
         commands.append('layer %s;' % layer)
         commands.extend(sorted(wires_by_layer[layer], key=wire_command_sort))
@@ -1621,6 +1858,7 @@ class Via:
         self.extent = via.attrib['extent']
 
     def __repr__(self):
+        """Return a string representation."""
         args = []
         for attr in dir(self):
             # skip hidden values/functions
@@ -1667,8 +1905,8 @@ if False:
 
 #snap_wires_to_grid(filename)
 
-create_teardrop_vias(filename)
+round_signals(filename)
 
-#round_signals(filename)
+create_teardrop_vias(filename)
 
 # delete_via_teardrops(filename)

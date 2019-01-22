@@ -44,7 +44,7 @@ class Point2D:
         self.y *= other
         return self
 
-    def __div__(self, other):
+    def __truediv__(self, other):
         return Point2D(self.x / other, self.y / other)
 
     def __itruediv__(self, other):
@@ -89,6 +89,7 @@ class Point2D:
         sin = math.sin(angle)
         x, y = self.x, self.y
         self.x, self.y = x * cos - y * sin, y * cos + x * sin
+        return self
 
     def __repr__(self):
         return '(%g, %g)' % (self.x, self.y)

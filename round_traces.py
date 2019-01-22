@@ -512,7 +512,7 @@ def create_signal(p1, a1, p2, a2, signal, width):
 
 def format_mm(mm, leading_plus=False):
     """Return a string version of mm."""
-    text = '%.8f' % (mm)
+    text = '%.9f' % (mm)
     if leading_plus:
         if not text.startswith('-'):
             text = '+' + text
@@ -600,7 +600,8 @@ def create_teardrop(joining_point,
                     via_point,
                     radius,
                     signal,
-                    width):
+                    width,
+                    polygon_teardrop=False):
     """
     Return the commands for creating a teardrop shape.
 
@@ -1984,7 +1985,8 @@ def create_teardrop_vias(filename):
                                             via_point,
                                             (via_diameter - wire_width) / 2.0,
                                             via.signal,
-                                            chain[0].width)
+                                            chain[0].width,
+                                            polygon_teardrop=create_polygons)
         # print('- Added %d teardrop wires' % len(teardrop_commands))
         # delete portion of chain between via and junction point
         layer = chain[0].layer
@@ -1994,7 +1996,8 @@ def create_teardrop_vias(filename):
         elif alpha > 0:
             point, _ = chain[0].get_distance_along(alpha)
             chain[0].curve *= 1.0 - alpha
-            chain[0].p1 = point
+            #chain[0].p1 = point
+            chain[0].p1 = junction_point
         # for x in teardrop_commands:
         #     print(x)
         if layer not in wires_by_layer:

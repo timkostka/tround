@@ -20,13 +20,184 @@ from point2d import Point2D
 
 # filename to modify
 L = []
-filename = r'C:\Users\tdkostk\Documents\eagle\projects\round_traces\round_traces_test.brd'
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\micro_ohmmeter\micro_ohmmeter_rev5.brd'
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5.brd'
+filename = r'C:\Users\tdkostk\Documents\eagle\projects\teardrop_vias\teardrop_test.brd'
+filename = r'C:\Users\tdkostk\Documents\eagle\projects\round_traces\round_traces_test.brd'
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5-rounded.brd'
-#filename = r'C:\Users\tdkostk\Documents\eagle\projects\teardrop_vias\teardrop_test.brd'
 
 mm_per_inch = 25.4
+
+
+class SMD:
+    """An SMD is a pad for a surface mount component pin."""
+
+    def __init__(self, smd_xml):
+        """Initialize using the xml tag."""
+        # pad name
+        self.name = smd_xml.attrib['name']
+        # center of pad
+        self.origin = Point2D(float(smd_xml.attrib['x']),
+                              float(smd_xml.attrib['y']))
+        # width of pad
+        self.dx = smd_xml.attrib['dx']
+        # height of pad
+        self.dy = smd_xml.attrib['dy']
+        # layer name
+        self.layer = smd_xml.attrib['layer']
+        # pad rotation
+        if 'rot' in smd_xml.attrib:
+            self.rot = float(smd_xml.attrib['rot'][1:])
+        else:
+            self.rot = 0.0
+        # pad roundness
+        if 'roundness' in smd_xml.attrib:
+            self.roundness = int(smd_xml.attrib['roundness'])
+        else:
+            self.roundness = 0
+
+    def __repr__(self):
+        """Return a string representation."""
+        args = []
+        for attr in dir(self):
+            # skip hidden values/functions
+            if attr.startswith('_'):
+                continue
+            # skip all functions
+            if callable(getattr(self, attr)):
+                continue
+            args.append('%s=%s' % (attr, getattr(self, attr)))
+        return '%s(%s)' % (self.__class__.__name__, ', '.join(sorted(args)))
+
+
+class PTH:
+    """A PTH is a circular plated through hole."""
+
+    def __init__(self,
+                 origin=Point2D(0.0, 0.0),
+                 drill=0.0,
+                 outer_diameter=0.0,
+                 inner_diameter=0.0,
+                 signal=None):
+        # location
+        self.origin = origin
+        # drill diameter
+        self.drill = drill
+        # outer diameter on outside layers
+        self.outer_diameter = outer_diameter
+        # outer diameter on inside layers
+        self.inner_diameter = inner_diameter
+        # connected signal
+        self.signal = signal
+
+    def __repr__(self):
+        """Return a string representation."""
+        args = []
+        for attr in dir(self):
+            # skip hidden values/functions
+            if attr.startswith('_'):
+                continue
+            # skip all functions
+            if callable(getattr(self, attr)):
+                continue
+            args.append('%s=%s' % (attr, getattr(self, attr)))
+        return '%s(%s)' % (self.__class__.__name__, ', '.join(sorted(args)))
+
+
+class Pad:
+    """A Pad is a plated through hole for a through hole component pin."""
+
+    def __init__(self, pad_xml):
+        """Initialize using the xml tag."""
+        # pad name
+        self.name = pad_xml.attrib['name']
+        # center of pad
+        self.origin = Point2D(float(pad_xml.attrib['x']),
+                              float(pad_xml.attrib['y']))
+        # drill diameter
+        self.drill = float(pad_xml.attrib['drill'])
+        # pad shape
+        if 'shape' in pad_xml.attrib:
+            self.shape = pad_xml.attrib['shape']
+        else:
+            self.shape = 'round'
+        # pad rotation (for non-circular pads)
+        if 'rot' in pad_xml.attrib:
+            self.rot = float(pad_xml.attrib['rot'][1:])
+        else:
+            self.rot = 0.0
+        # pad diameter
+        if 'diameter' in pad_xml.attrib:
+            self.diameter = float(pad_xml.attrib['diameter'])
+        else:
+            self.diameter = 0.0
+        # get first attribute
+        if 'first' in pad_xml.attrib:
+            self.first = pad_xml.attrib['first']
+        else:
+            self.first = 'no'
+
+    def get_diameters(self, dru):
+        """Return the actual outer and inner diameters given the DRU rules."""
+        # figure out actual outer diameter
+        annular_ring = self.drill * dru.param['rvViaOuter']
+        annular_ring = max(annular_ring, dru.param['rlMinViaOuter'])
+        annular_ring = min(annular_ring, dru.param['rlMaxViaOuter'])
+        dru_diameter = self.drill + 2 * annular_ring
+        outer_diameter = max(self.diameter, dru_diameter)
+        # figure out actual inner diameter
+        annular_ring = self.drill * dru.param['rvViaInner']
+        annular_ring = max(annular_ring, dru.param['rlMinViaInner'])
+        annular_ring = min(annular_ring, dru.param['rlMaxViaInner'])
+        dru_diameter = self.drill + 2 * annular_ring
+        inner_diameter = max(self.diameter, dru_diameter)
+        return outer_diameter, inner_diameter
+
+    def __repr__(self):
+        """Return a string representation."""
+        args = []
+        for attr in dir(self):
+            # skip hidden values/functions
+            if attr.startswith('_'):
+                continue
+            # skip all functions
+            if callable(getattr(self, attr)):
+                continue
+            args.append('%s=%s' % (attr, getattr(self, attr)))
+        return '%s(%s)' % (self.__class__.__name__, ', '.join(sorted(args)))
+
+
+class LibraryPackage:
+    """A LibraryPackage is a footprint within a library."""
+
+    def __init__(self, package_xml):
+        """Initialize using the xml tag."""
+        self.pads = []
+        self.smds = []
+        for item in package_xml:
+            if item.tag == 'smd':
+                self.smds.append(SMD(item))
+                #x = float(item.attrib['x'])
+                #y = float(item.attrib['y'])
+                #points.append(Point2D(x, y))
+            elif item.tag == 'pad':
+                self.pads.append(Pad(item))
+                #x = float(item.attrib['x'])
+                #y = float(item.attrib['y'])
+                #points.append(Point2D(x, y))
+
+    def __repr__(self):
+        """Return a string representation."""
+        args = []
+        for attr in dir(self):
+            # skip hidden values/functions
+            if attr.startswith('_'):
+                continue
+            # skip all functions
+            if callable(getattr(self, attr)):
+                continue
+            args.append('%s=%s' % (attr, getattr(self, attr)))
+        return '%s(%s)' % (self.__class__.__name__, ', '.join(sorted(args)))
 
 
 def get_package_points(package_xml):
@@ -52,24 +223,23 @@ def read_libraries(filename):
     # store DRU information
     dru = dict()
     for libraries_tag in root.iter('libraries'):
-        for item in libraries_tag:
-            if item.tag != 'library':
-                continue
-            library_name = item.attrib['name']
-            if library_name not in libraries:
-                libraries[library_name] = dict()
+        for library_tag in root.iter('library'):
+            library_name = library_tag.attrib['name']
+            assert library_name not in libraries
+            libraries[library_name] = dict()
             packages = libraries[library_name]
-            for package_item in item.iter('package'):
-                name = package_item.attrib['name']
-                points = get_package_points(package_item)
-                packages[name] = points
+            for package_tag in library_tag.iter('package'):
+                name = package_tag.attrib['name']
+                assert name not in packages
+                packages[name] = LibraryPackage(package_tag)
     return libraries
 
 
-class Package:
-    """A Package holds information on a single component placement."""
+class Element:
+    """An Element holds information on a single component placement."""
 
     def __init__(self, xml_tag):
+        self.name = xml_tag.attrib['name']
         self.origin = Point2D(float(xml_tag.attrib['x']),
                               float(xml_tag.attrib['y']))
         self.library = xml_tag.attrib['library']
@@ -92,7 +262,7 @@ class Package:
                      self.mirrored))
 
     def __repr__(self):
-        return ('Package(%s, %s, %s, %s, %s)'
+        return ('Element(%s, %s, %s, %s, %s)'
                 % (self.library,
                    self.footprint,
                    self.origin,
@@ -100,7 +270,7 @@ class Package:
                    self.mirrored))
 
 
-def read_placements(filename):
+def read_elements(filename):
     """
     Return the component placements within the file.
 
@@ -108,7 +278,7 @@ def read_placements(filename):
     """
     # tree = ElementTree.parse(filename)
     # root = tree.getroot()
-    placements = [Package(element)
+    placements = [Element(element)
                   for element in
                   ElementTree.parse(filename).getroot().iter('element')]
     return placements
@@ -671,7 +841,7 @@ def round_signals(filename):
     # read footprints from board file
     libraries = read_libraries(filename)
     # read part placement in board file
-    parts = read_placements(filename)
+    parts = read_elements(filename)
     # make smd pads locked points
     for part in parts:
         origin = part.origin
@@ -1308,7 +1478,7 @@ def snap_wires_to_grid(filename, tolerance_inch=1e-6, spacing_inch=1e-3):
 
 
 def read_vias(filename, dru=None):
-    """Read in vias from the given file."""
+    """Read and return vias from the given file."""
     # search through the XML tree
     tree = ElementTree.parse(filename)
     root = tree.getroot()
@@ -1344,6 +1514,61 @@ def read_vias(filename, dru=None):
             else:
                 via.inner_diameter = dru_diameter
     return vias
+
+
+def read_contact_refs(filename):
+    """Read and return contact references from the given file."""
+    # if LED1 pad A is connected to VCC
+    # --> contact_ref[('LED1', 'A')] = 'VCC'
+    contact_ref = dict()
+    # search through the XML tree
+    tree = ElementTree.parse(filename)
+    root = tree.getroot()
+    for signal in root.iter('signal'):
+        signal_name = signal.attrib['name']
+        for ref in signal.iter('contactref'):
+            key = (ref.attrib['element'], ref.attrib['pad'])
+            assert key not in contact_ref
+            contact_ref[key] = signal_name
+    return contact_ref
+
+
+def read_pad_pths(filename, dru=None):
+    """Read and return pths created by pads from the given file."""
+    # hold all pths
+    pths = []
+    # search through the XML tree
+    tree = ElementTree.parse(filename)
+    root = tree.getroot()
+    # read footprints from board file
+    libraries = read_libraries(filename)
+    # read in DRU
+    dru = read_design_rules(filename)
+    # read element placement in board file
+    elements = read_elements(filename)
+    # contact references
+    contact_refs = read_contact_refs(filename)
+    # look at each package and add PTHs found in library
+    for element in elements:
+        # store element origin
+        origin = element.origin
+        # alias this footprint
+        footprint = libraries[element.library][element.footprint]
+        # add an entry for each pad in the footprint
+        for pad in footprint.pads:
+            point = copy.copy(pad.origin)
+            if element.rotation != 0:
+                point.rotate(element.rotation * math.pi / 180.0)
+            if element.mirrored:
+                point.x = -point.x
+            outer, inner = pad.get_diameters(dru)
+            if (element.name, pad.name) in contact_refs:
+                signal = contact_refs[(element.name, pad.name)]
+            else:
+                signal = None
+            pths.append(PTH(origin + point, pad.drill, outer, inner, signal))
+    # look at vias and add those
+    return pths
 
 
 def read_design_rules(filename):
@@ -1514,9 +1739,27 @@ def find_point_on_chain(wire_chain, via_point, target_distance):
     return None
 
 
+def get_nearest_point(point, list_of_points):
+    """Return the distance to the nearest point and that point."""
+    nearest_distance = None
+    nearest_point = None
+    for p in list_of_points:
+        this_distance = point.distance_to(p)
+        if nearest_distance is None or this_distance < nearest_distance:
+            nearest_point = p
+            nearest_distance = this_distance
+    return nearest_distance, nearest_point
+
+
 def create_teardrop_vias(filename):
-    """Create a script to convert vias to teardrop vias in the given file."""
-    # hold commands to redraw all vias/wires
+    """Create a script to convert pths to teardrop pths in the given file."""
+    # options
+    # if True, will also teardrop plated through holes
+    create_teardrops_on_pths = True
+    # if True, will create teardrop polygon instead of wires
+    create_polygons = False
+    assert not create_polygons
+    # hold commands to redraw all pths/wires
     commands = []
     commands.append('set optimizing off;')
     commands.append('display none;')
@@ -1529,10 +1772,41 @@ def create_teardrop_vias(filename):
     commands.append('change drill %.9f;' % (0.013 * 25.4))
     # hold design rules
     dru = read_design_rules(filename)
+    # hold all pths
+    pths = []
     # hold all vias
     vias = read_vias(filename, dru)
+    print('Found %d vias' % len(vias))
+    # add vias to pths
+    for via in vias:
+        pths.append(PTH(via.origin,
+                        via.drill,
+                        via.outer_diameter,
+                        via.inner_diameter,
+                        via.signal))
     # hold all wires
     wires = read_wires(filename)
+    # get wire points
+    wire_points = set()
+    for wire in wires:
+        wire_points.add(wire.p1)
+        wire_points.add(wire.p2)
+    # read in through hole pads
+    if create_teardrops_on_pths:
+        pads = read_pad_pths(filename)
+        print('Found %d pads' % len(pads))
+        pad_tolerance_mm = 10 * 3.125e-6
+        for pad in pads:
+            distance, point = get_nearest_point(pad.origin, wire_points)
+            if distance > 0 and distance < pad_tolerance_mm:
+                print('Moving pad by %g' % distance)
+                pad.origin = point
+        print(pads)
+        pths += pads
+        # add through hold pads to pths
+    print('Found %d total PTHs' % len(pths))
+    # since pad positions are imprecise, snap them to the nearest wire end
+    # point if it's close enough
     # To figure out wire tolopogy, we first find the number of wires connected
     # to each point/layer.  If there are only two, those wires should be
     # combined to make a wire chain.
@@ -1546,7 +1820,7 @@ def create_teardrop_vias(filename):
     # points with other than 2 wires are fixed points
     end_points = set(key for key, value in wire_count.items() if value != 2)
     # via points are also fixed
-    via_points = set(via.origin for via in vias)
+    via_points = set(via.origin for via in pths)
     # store points that are midway through a wire chain
     mid_points = set(key
                      for key, value in wire_count.items()
@@ -1575,10 +1849,10 @@ def create_teardrop_vias(filename):
         # print('- %s: %s' % (key, value))
     # get map from point to via
     via_at_point = dict()
-    for via in vias:
+    for via in pths:
         assert via.origin not in via_at_point
         via_at_point[via.origin] = via
-    # figure out wire chains starting at vias
+    # figure out wire chains starting at pths
     # wire_chain[(1, Point2D(0, 0))] = [Wire(...), Wire(...)]
     # wire_chains[0] = [(1, Point2D(0, 0)), Wire(...), Wire(...)]
     wire_chains = []
@@ -1637,7 +1911,7 @@ def create_teardrop_vias(filename):
         # if there's not a via at the end, keep the entire chain
         if chain[-1].p2 not in via_points:
             continue
-        # print('Found chain with vias at each end: %s' % chain)
+        # print('Found chain with pths at each end: %s' % chain)
         # get total length of chain
         chain_length = sum(wire.get_length() for wire in chain)
         assert chain_length > 0.0
@@ -1683,7 +1957,7 @@ def create_teardrop_vias(filename):
         if total_chain_length < via_diameter / 2.0 + tolerance_mm:
             # print('- Chain too short: %s' % chain)
             continue
-        # can't teardrop vias if the wires are bigger than the via diameter
+        # can't teardrop pths if the wires are bigger than the via diameter
         if via_diameter <= wire_width + tolerance_mm:
             # print('- Wire at %s too big (%s)' % (via_point, via))
             continue
@@ -1798,6 +2072,10 @@ class Via:
         self.drill = float(via.attrib['drill'])
         if 'diameter' in via.attrib:
             self.diameter = float(via.attrib['diameter'])
+        else:
+            self.diameter = 0.0
+        self.inner_diameter = self.diameter
+        self.outer_diameter = self.diameter
         self.extent = via.attrib['extent']
 
     def __repr__(self):
@@ -1816,7 +2094,7 @@ class Via:
 
 #snap_wires_to_grid(filename)
 
-#round_signals(filename)
+# round_signals(filename)
 
 create_teardrop_vias(filename)
 

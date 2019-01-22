@@ -1716,6 +1716,11 @@ def read_wires(filename):
     for signals in root.iter('signals'):
         for signal in signals.iter('signal'):
             for wire in signal.iter('wire'):
+                # skip wires not on layers 1-16
+                if int(wire.attrib['layer']) < 1:
+                    continue
+                if int(wire.attrib['layer']) > 16:
+                    continue
                 wires.append(Wire(wire, signal_name=signal.attrib['name']))
     return wires
 

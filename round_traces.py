@@ -22,9 +22,9 @@ from point2d import Point2D
 L = []
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\micro_ohmmeter\micro_ohmmeter_rev5.brd'
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5.brd'
-filename = r'C:\Users\tdkostk\Documents\eagle\projects\teardrop_vias\teardrop_test.brd'
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\round_traces\round_traces_test.brd'
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5-rounded.brd'
+filename = r'C:\Users\tdkostk\Documents\eagle\projects\teardrop_vias\teardrop_test.brd'
 
 mm_per_inch = 25.4
 
@@ -695,22 +695,7 @@ def create_teardrop(joining_point,
     a2 = ((a2 + 180) % 360) - 180
     a3 = (end_angle_3 - start_angle_3) * 180 / math.pi
     a3 = ((a3 + 180) % 360) - 180
-    commands.append('line \'%s\' %s (%s %s) %s (%s %s);'
-                    % (signal,
-                       width,
-                       format_mm(joining_point.x),
-                       format_mm(joining_point.y),
-                       format_mm(a1, True),
-                       format_mm(p1.x),
-                       format_mm(p1.y)))
-    commands.append('line \'%s\' %s (%s %s) %s (%s %s);'
-                    % (signal,
-                       width,
-                       format_mm(joining_point.x),
-                       format_mm(joining_point.y),
-                       format_mm(a2, True),
-                       format_mm(p2.x),
-                       format_mm(p2.y)))
+    # add initial line
     commands.append('line \'%s\' %s (%s %s) %s (%s %s);'
                     % (signal,
                        width,
@@ -719,17 +704,55 @@ def create_teardrop(joining_point,
                        format_mm(a3, True),
                        format_mm(via_point.x),
                        format_mm(via_point.y)))
+    # add polygon or lines
+    if polygon_teardrop:
+        a3 = via_point.angle_to(p2) - via_point.angle_to(p1)
+        a3 *= 180.0 / math.pi
+        a3 = ((a3 + 180.0) % 360.0) - 180.0
+        polygon = ('polygon \'%s\' %s (%s %s) %s (%s %s)'
+                   % (signal,
+                      width,
+                      format_mm(joining_point.x),
+                      format_mm(joining_point.y),
+                      format_mm(a1, True),
+                      format_mm(p1.x),
+                      format_mm(p1.y)))
+        if False:
+            polygon += (' %s (%s %s)'
+                        % (format_mm(a3, True),
+                          format_mm(p2.x),
+                          format_mm(p2.y)))
+        else:
+            polygon += (' %s (%s %s) %s (%s %s)'
+                        % (format_mm(0, True),
+                           format_mm(via_point.x),
+                           format_mm(via_point.y),
+                           format_mm(0, True),
+                           format_mm(p2.x),
+                           format_mm(p2.y)))
+        polygon += (' %s (%s %s);'
+                    % (format_mm(-a2, True),
+                       format_mm(joining_point.x),
+                       format_mm(joining_point.y)))
+        commands.append(polygon)
+    else:
+        commands.append('line \'%s\' %s (%s %s) %s (%s %s);'
+                        % (signal,
+                           width,
+                           format_mm(joining_point.x),
+                           format_mm(joining_point.y),
+                           format_mm(a1, True),
+                           format_mm(p1.x),
+                           format_mm(p1.y)))
+        commands.append('line \'%s\' %s (%s %s) %s (%s %s);'
+                        % (signal,
+                           width,
+                           format_mm(joining_point.x),
+                           format_mm(joining_point.y),
+                           format_mm(a2, True),
+                           format_mm(p2.x),
+                           format_mm(p2.y)))
     return commands
-    # endAngle3 = math.atan2(via_point - d3 * normal)
-    # if d3 < 0:
-    #    start_angle_1 -= math.pi
-    # get two solutions to the problem
-    # p = point + d * normal
-    # ||via_point - p|| = r0
-    # ndp = normal.dot(point)
-    # diff = math.sqrt(-ndp ** 2 + r0 ** 2)
-    # d1 = -ndp + diff
-    # d2 = -ndp + diff
 
 
 def snapped_point(point):
@@ -1758,11 +1781,11 @@ def create_teardrop_vias(filename):
     # if True, will also teardrop plated through holes
     create_teardrops_on_pths = True
     # if True, will create teardrop polygon instead of wires
-    create_polygons = False
-    assert not create_polygons
+    create_polygons = True
     # hold commands to redraw all pths/wires
     commands = []
     commands.append('set optimizing off;')
+    commands.append('change thermals off;')
     commands.append('display none;')
     commands.append('display 1 to 16;')
     commands.append('group all;')

@@ -22,9 +22,9 @@ from point2d import Point2D
 L = []
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\round_traces\round_traces_test.brd'
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\micro_ohmmeter\micro_ohmmeter_rev5.brd'
-#filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5.brd'
-#filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5-rounded.brd'
-filename = r'C:\Users\tdkostk\Documents\eagle\projects\teardrop_vias\teardrop_test.brd'
+filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5.brd'
+filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5-rounded.brd'
+#filename = r'C:\Users\tdkostk\Documents\eagle\projects\teardrop_vias\teardrop_test.brd'
 
 
 class StraightWire:
@@ -518,8 +518,8 @@ def create_teardrop(joining_point,
         d3 = 1e100
     else:
         d3 = via.dot(via) / d3
-    print('\nd1=%s, d2=%s, d3=%s' % (d1, d2, d3))
-    print('t=%s, n=%s' % (tangent, normal))
+    # print('\nd1=%s, d2=%s, d3=%s' % (d1, d2, d3))
+    # print('t=%s, n=%s' % (tangent, normal))
     start_angle_1 = via.angle() + math.pi / 2.0
     start_angle_2 = via.angle() + math.pi / 2.0
     start_angle_3 = via.angle() + math.pi / 2.0
@@ -542,7 +542,7 @@ def create_teardrop(joining_point,
         p1 = p1 + radius * Point2D(math.cos(end_angle_1), math.sin(end_angle_1))
     else:
         p1 = p1 - radius * Point2D(math.cos(end_angle_1), math.sin(end_angle_1))
-    print('d1=%g, dp1=%g' % (d1, center.distance_to(p1)))
+    # print('d1=%g, dp1=%g' % (d1, center.distance_to(p1)))
     # find second point on radius to join with
     center = joining_point + d2 * normal
     p2 = via_point
@@ -550,8 +550,8 @@ def create_teardrop(joining_point,
         p2 = p2 + radius * Point2D(math.cos(end_angle_2), math.sin(end_angle_2))
     else:
         p2 = p2 - radius * Point2D(math.cos(end_angle_2), math.sin(end_angle_2))
-    print('d2=%g, dp2=%g' % (d2, center.distance_to(p2)))
-    print('ea1=%s, ea2=%s' % (end_angle_1 * 180 / math.pi, end_angle_2 * 180 / math.pi))
+    # print('d2=%g, dp2=%g' % (d2, center.distance_to(p2)))
+    # print('ea1=%s, ea2=%s' % (end_angle_1 * 180 / math.pi, end_angle_2 * 180 / math.pi))
     commands = []
     #
     if False:
@@ -1626,6 +1626,7 @@ def create_teardrop_vias(filename):
     print('- Found %d wire chain end points.' % len(end_points))
     print('- Found %d via points.' % len(via_points))
     print('- Found %d mid points.' % len(mid_points))
+    print(mid_points)
     # store wires by layer/point
     wire_by_point = dict()
     for wire in wires:
@@ -1638,9 +1639,10 @@ def create_teardrop_vias(filename):
         wire_by_point[point].append(wire)
         point = (wire.layer, wire.p2)
         wire_by_point[point].append(wire)
-    print('wire_by_point:')
+    # print('wire_by_point:')
     for key, value in wire_by_point.items():
-        print('- %s: %s' % (key, value))
+        pass
+        # print('- %s: %s' % (key, value))
     # get map from point to via
     via_at_point = dict()
     for via in vias:
@@ -1648,55 +1650,74 @@ def create_teardrop_vias(filename):
         via_at_point[via.origin] = via
     # figure out wire chains starting at vias
     # wire_chain[(1, Point2D(0, 0))] = [Wire(...), Wire(...)]
-    wire_chains = dict()
+    # wire_chains[0] = [(1, Point2D(0, 0)), Wire(...), Wire(...)]
+    wire_chains = []
     # hold wires which are used in chains
     used_wires = set()
     for wire in wires:
+        layer = wire.layer
         for p in [wire.p1, wire.p2]:
-            point = (wire.layer, p)
-            if point[1] not in via_points:
+            # point = (wire.layer, p)
+            if p not in via_points:
                 continue
             used_wires.add(wire)
-            wire_chains[point] = [wire]
-            this_chain = wire_chains[point]
-            new_point = (wire.layer, wire.get_other_point(point[1]))
-            while new_point in mid_points:
-                new_wires = wire_by_point[new_point]
+            # start chain with this wire, set p1 to the via location
+            this_chain = [wire]
+            wire_chains.append(this_chain)
+            if p != wire.p1:
+                assert p == wire.p2
+                this_chain[0] = wire.reversed()
+                assert this_chain[0].p1 == p
+            #wire_chains[point] = [wire]
+            #this_chain = wire_chains[point]
+            #new_point = (wire.layer, wire.get_other_point(point[1]))
+            while (layer, this_chain[-1].p2) in mid_points:
+                new_wires = wire_by_point[(layer, this_chain[-1].p2)]
                 assert len(new_wires) == 2
-                if new_wires[0] == this_chain[-1]:
-                    used_wires.add(new_wires[1])
+                # TODO: fix this
+                if (new_wires[0].p1 == this_chain[-1].p1 or
+                        new_wires[0].p2 == this_chain[-1].p1):
                     this_chain.append(new_wires[1])
+                    used_wires.add(new_wires[1])
                 else:
-                    assert new_wires[1] == this_chain[-1]
+                    assert (new_wires[1].p1 == this_chain[-1].p1 or
+                            new_wires[1].p2 == this_chain[-1].p1)
                     this_chain.append(new_wires[0])
                     used_wires.add(new_wires[0])
-                new_point = (new_point[0],
-                             this_chain[-1].get_other_point(new_point[1]))
+                if this_chain[-1].p2 == this_chain[-2].p2:
+                    this_chain[-1] = this_chain[-1].reversed()
+                else:
+                    assert this_chain[-1].p1 == this_chain[-2].p2
+                #new_point = (new_point[0],
+                #             this_chain[-1].get_other_point(new_point[1]))
     print('- Found %d wire chains.' % len(wire_chains))
+    for x in wire_chains:
+        print(x)
     print('- Wire chain lengths: %s' % [sum(x.get_length() for x in chain)
-                                        for chain in wire_chains.values()])
+                                        for chain in wire_chains])
     unused_wires = [wire for wire in wires if wire not in used_wires]
     print('- Found %d wires not found in chains' % len(unused_wires))
     # change wires within each chain such that points are sorted
     # [wire1, wire2, wire3, ...]
     # via at wire1.p1 with wire1.p2 == wire2.p1, etc.
-    for via, chain in wire_chains.items():
-        starting_point = via[1]
-        new_chain = []
-        for wire in chain:
-            if wire.p2 == starting_point:
-                wire = wire.reversed()
-            else:
-                assert wire.p1 == starting_point
-            new_chain.append(wire)
-            # print(via, new_chain, starting_point)
-            starting_point = wire.p2
-        wire_chains[via] = new_chain
+    if False:
+        for chain in wire_chains:
+            starting_point = via[1]
+            new_chain = []
+            for wire in chain:
+                if wire.p2 == starting_point:
+                    wire = wire.reversed()
+                else:
+                    assert wire.p1 == starting_point
+                new_chain.append(wire)
+                # print(via, new_chain, starting_point)
+                starting_point = wire.p2
+            wire_chains[via] = new_chain
     teardrop_inner_diameter_mm = 0.050 * 25.4
     # for chains which have a via at both ends, delete the second half
     print(via_points)
-    print(wire_chains.values())
-    for via, chain in wire_chains.items():
+    print(wire_chains)
+    for chain in wire_chains:
         # if there's not a via at the end, keep the entire chain
         if chain[-1].p2 not in via_points:
             continue
@@ -1726,48 +1747,47 @@ def create_teardrop_vias(filename):
             chain[-1].p2 = point
             chain[-1].curve *= alpha
     print('- Wire chain lengths: %s' % [sum(x.get_length() for x in chain)
-                                        for chain in wire_chains.values()])
-    for x in wire_chains.values():
+                                        for chain in wire_chains])
+    for x in wire_chains:
         print(x)
     # the via diameter must be at least this much more than the wire width
     # in order to create a teardrop via
     tolerance_mm = 0.1
     # hold wire commands to draw by layer
     wires_by_layer = dict()
-    for point, chain in wire_chains.items():
-        print('Processing chain at point %s: %s' % (point, chain))
-
-        via_point = point[1]
+    for chain in wire_chains:
+        print('\nProcessing chain at point %s: %s' % (chain[0].p1, chain))
+        via_point = chain[0].p1
         wire_width = chain[0].width
-        via = via_at_point[via_point]
+        via = via_at_point[chain[0].p1]
         via_diameter = via.outer_diameter
         total_chain_length = sum(x.get_length() for x in chain)
         print('- Total length: %s' % total_chain_length)
         # if chain is too short, don't do anything
         if total_chain_length < via_diameter / 2.0 + tolerance_mm:
-            print('Chain too short: %s' % chain)
+            print('- Chain too short: %s' % chain)
             continue
         # can't teardrop vias if the wires are bigger than the via diameter
         if via_diameter <= wire_width + tolerance_mm:
-            print('wire at %s too big (%s)' % (via_point, via))
+            print('- Wire at %s too big (%s)' % (via_point, via))
             continue
         r1 = via_diameter / 2.0
         r2 = teardrop_inner_diameter_mm + wire_width / 2.0
         d = math.sqrt((r1 + r2) ** 2 - (r2 + wire_width / 2.0) ** 2)
         result = find_point_on_chain(chain, via_point, d)
-        print(result)
+        # print(result)
         # if chain is not long enough, ignore it
         if result is None:
-            print('Chain short but usable: %s' % chain)
+            print('- Chain short but usable: %s' % chain)
             # use end of chain
-            print(chain[-1].get_distance_along(1.0))
+            # print(chain[-1].get_distance_along(1.0))
             result = [list(chain[-1].get_distance_along(1.0)), (len(chain) - 1, 1.0)]
-            print(result)
-            print(result)
-            print(result)
+            # print(result)
+            # print(result)
+            # print(result)
             result[0][1] = -result[0][1]
             #continue
-        print(result)
+        # print(result)
         (junction_point, tangent), (wire_index, alpha) = result
         teardrop_commands = create_teardrop(junction_point,
                                             tangent,
@@ -1775,6 +1795,7 @@ def create_teardrop_vias(filename):
                                             (via_diameter - wire_width) / 2.0,
                                             via.signal,
                                             chain[0].width)
+        print('- Added %d teardrop wires' % len(teardrop_commands))
         # delete portion of chain between via and junction point
         layer = chain[0].layer
         chain[:] = chain[wire_index:]
@@ -1784,14 +1805,14 @@ def create_teardrop_vias(filename):
             point, _ = chain[0].get_distance_along(alpha)
             chain[0].curve *= 1.0 - alpha
             chain[0].p1 = point
-        for x in teardrop_commands:
-            print(x)
+        # for x in teardrop_commands:
+        #     print(x)
         if layer not in wires_by_layer:
             wires_by_layer[layer] = []
         wires_by_layer[layer].extend(teardrop_commands)
-        print(via_point, junction_point)
+        # print(via_point, junction_point)
     # add wires in chains
-    for point, chain in wire_chains.items():
+    for chain in wire_chains:
         if wire.layer not in wires_by_layer:
             wires_by_layer[wire.layer] = []
         for wire in chain:

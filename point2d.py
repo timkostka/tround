@@ -77,11 +77,11 @@ class Point2D:
 
     def distance_to(self, other):
         """Return the distance from this point to the given point."""
-        return (self - other).norm()
+        return math.sqrt((other.x - self.x) ** 2 + (other.y - self.y) ** 2)
 
     def norm(self):
         """Return the distance from the origin."""
-        return math.sqrt(self.dot(self))
+        return math.sqrt(self.x ** 2 + self.y ** 2)
 
     def rotate(self, angle):
         """Rotate the point CCW about the origin the given angle."""

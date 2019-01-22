@@ -1503,10 +1503,10 @@ class Wire:
         _, radius, _ = self.get_curve_points()
         return radius * abs(self.curve) * math.pi / 180.0
 
-    def get_command(self, signal_name=None):
+    def get_command(self):
         """Return the command to recreate the wire."""
         command = ('wire \'%s\' %.9f (%.9f %.9f)%s (%.9f %.9f);'
-                   % (signal_name,
+                   % (self.signal if self.signal else '',
                       self.width,
                       self.p1.x,
                       self.p1.y,
@@ -1649,11 +1649,14 @@ def create_teardrop_vias(filename):
     # figure out wire chains starting at vias
     # wire_chain[(1, Point2D(0, 0))] = [Wire(...), Wire(...)]
     wire_chains = dict()
+    # hold wires which are used in chains
+    used_wires = set()
     for wire in wires:
         for p in [wire.p1, wire.p2]:
             point = (wire.layer, p)
             if point[1] not in via_points:
                 continue
+            used_wires.add(wire)
             wire_chains[point] = [wire]
             this_chain = wire_chains[point]
             new_point = (wire.layer, wire.get_other_point(point[1]))
@@ -1661,14 +1664,19 @@ def create_teardrop_vias(filename):
                 new_wires = wire_by_point[new_point]
                 assert len(new_wires) == 2
                 if new_wires[0] == this_chain[-1]:
+                    used_wires.add(new_wires[1])
                     this_chain.append(new_wires[1])
                 else:
                     assert new_wires[1] == this_chain[-1]
                     this_chain.append(new_wires[0])
-                new_point = (new_point[0], this_chain[-1].get_other_point(new_point[1]))
+                    used_wires.add(new_wires[0])
+                new_point = (new_point[0],
+                             this_chain[-1].get_other_point(new_point[1]))
     print('- Found %d wire chains.' % len(wire_chains))
     print('- Wire chain lengths: %s' % [sum(x.get_length() for x in chain)
                                         for chain in wire_chains.values()])
+    unused_wires = [wire for wire in wires if wire not in used_wires]
+    print('- Found %d wires not found in chains' % len(unused_wires))
     # change wires within each chain such that points are sorted
     # [wire1, wire2, wire3, ...]
     # via at wire1.p1 with wire1.p2 == wire2.p1, etc.
@@ -1714,9 +1722,7 @@ def create_teardrop_vias(filename):
         else:
             chain[:] = chain[:index + 1]
             chain[-1] = copy.copy(chain[-1])
-            # TODO: support curved wires
             point, _ = chain[-1].get_distance_along(alpha)
-            # chain[-1].p2 = chain[-1].p1 + alpha * (chain[-1].p2 - chain[-1].p1)
             chain[-1].p2 = point
             chain[-1].curve *= alpha
     print('- Wire chain lengths: %s' % [sum(x.get_length() for x in chain)
@@ -1789,7 +1795,15 @@ def create_teardrop_vias(filename):
         if wire.layer not in wires_by_layer:
             wires_by_layer[wire.layer] = []
         for wire in chain:
-            wires_by_layer[wire.layer].append(wire.get_command(signal_name=wire.signal))
+            # wires_by_layer[wire.layer].append(wire.get_command(signal_name=wire.signal))
+            wires_by_layer[wire.layer].append(wire.get_command())
+    # add wires not found in chains
+    for wire in unused_wires:
+        if wire.layer not in wires_by_layer:
+            wires_by_layer[wire.layer] = []
+        # wires_by_layer[wire.layer].append(wire.get_command(signal_name=wire.signal))
+        wires_by_layer[wire.layer].append(wire.get_command())
+    # add wire commands
     for layer in sorted(wires_by_layer.keys()):
         commands.append('layer %s;' % layer)
         commands.extend(sorted(wires_by_layer[layer], key=wire_command_sort))
@@ -1905,7 +1919,7 @@ if False:
 
 #snap_wires_to_grid(filename)
 
-round_signals(filename)
+#round_signals(filename)
 
 create_teardrop_vias(filename)
 

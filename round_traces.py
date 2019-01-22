@@ -26,59 +26,7 @@ filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-t
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5-rounded.brd'
 #filename = r'C:\Users\tdkostk\Documents\eagle\projects\teardrop_vias\teardrop_test.brd'
 
-
-class StraightWire:
-    """Holds information about a straight trace."""
-
-    def __init__(self, wire, signal=''):
-        assert 'curve' not in wire.attrib
-        self.start_point = Point2D(float(wire.attrib['x1']),
-                                   float(wire.attrib['y1']))
-        self.end_point = Point2D(float(wire.attrib['x2']),
-                                 float(wire.attrib['y2']))
-        self.length = (self.start_point - self.end_point).norm()
-        self.signal = signal
-        self.width = wire.attrib['width']
-        self.layer = wire.attrib['layer']
-
-
-# read in wires
-if False:
-    tree = ElementTree.parse(filename)
-    root = tree.getroot()
-
-    # hold wires for each signal
-    wire = dict()
-
-    for signal in root.iter('signal'):
-        print(signal.tag, signal.attrib)
-        # read in all wires
-        wires = []
-        # for each point, count the number of wires that connect it
-        wires_at_point = dict()
-        for child in signal:
-            if child.tag != 'wire':
-                continue
-            start_point = Point2D(float(child.attrib['x1']),
-                                  float(child.attrib['y1']))
-            end_point = Point2D(float(child.attrib['x2']),
-                                float(child.attrib['y2']))
-            # if start and end points are the same, i'm not sure what to do
-            if start_point == end_point:
-                print(child, start_point, end_point)
-                print('ERROR: wire start and end points are identical.')
-                exit(1)
-                continue
-            wires.append(child)
-            wires_at_point[start_point] = wires_at_point.get(start_point, 0) + 1
-            wires_at_point[end_point] = wires_at_point.get(end_point, 0) + 1
-        # find corners
-        print(wires_at_point)
-        corner = []
-        for point, connections in wires_at_point.items():
-            if connections != 2:
-                continue
-            print('Corner at %s' % point)
+mm_per_inch = 25.4
 
 
 def get_package_points(package_xml):
@@ -778,7 +726,6 @@ def round_signals(filename):
                 command = get_wire_command(child, signal_name)
                 wires_by_layer[layer_name].append(command)
                 continue
-            # wires.append(StraightWire(child, signal.attrib['name']))
             # if start and end points are the same, ignore this wire
             # (not sure if this is possible)
             if start_point == end_point:
@@ -1451,36 +1398,19 @@ class Wire:
 
     def get_distance_along(self, alpha):
         """
-        Return the point alpha percent along the wire.
+        Return the point and tangent alpha percent along the wire.
 
         return is point, tangent
 
         """
         assert 0.0 <= alpha <= 1.0
-        #if alpha == 0.0:
-        #    return self.p1
-        #elif alpha == 1.0:
-        #    return self.p2
         # process straight line
         if self.curve == 0.0:
             point = self.p1 + alpha * (self.p2 - self.p1)
             tangent = (self.p2 - self.p1).normalize()
             return point, tangent
-        #distance = self.p1.distance_to(self.p2)
-        # sin(theta / 2) == (d / 2) / r
-        #radius = distance / 2.0 / math.sin(self.curve * math.pi / 180.0)
-        #midpoint = self.p1 + 0.5 * (self.p2 - self.p1)
-        #normal = (self.p2 - self.p1).rotate(math.pi / 2.0)
-        #delta = radius ** 2 - midpoint.distance_to(self.p2) ** 2
-        #if delta < 0.0:
-        #    delta = 0.0
-        #delta = math.sqrt(delta)
-        #if self.curve > 0:
-        #    center = midpoint + normal * delta
-        #else:
-        #    center = midpoint - normal * delta
+        #
         center, radius, start_angle = self.get_curve_points()
-        #start_angle = center.angle_to(self.p1)
         angle = start_angle + alpha * self.curve * math.pi / 180
         point = center + radius * Point2D(math.cos(angle), math.sin(angle))
         tangent = Point2D(math.cos(angle + math.pi / 2.0),
@@ -1699,19 +1629,6 @@ def create_teardrop_vias(filename):
     # change wires within each chain such that points are sorted
     # [wire1, wire2, wire3, ...]
     # via at wire1.p1 with wire1.p2 == wire2.p1, etc.
-    if False:
-        for chain in wire_chains:
-            starting_point = via[1]
-            new_chain = []
-            for wire in chain:
-                if wire.p2 == starting_point:
-                    wire = wire.reversed()
-                else:
-                    assert wire.p1 == starting_point
-                new_chain.append(wire)
-                # print(via, new_chain, starting_point)
-                starting_point = wire.p2
-            wire_chains[via] = new_chain
     teardrop_inner_diameter_mm = 0.050 * 25.4
     # for chains which have a via at both ends, delete the second half
     # print(via_points)
@@ -1843,14 +1760,6 @@ def create_teardrop_vias(filename):
         f.write('\n'.join(commands))
     print('\nScript generated at %s' % (script_filename))
 
-    #print(wire_chains)
-    #if point not in wire_chain:
-    #    wire_chain[point] = []
-
-    # figure out wire topology
-    # we only care about
-    #print(wires)
-
 
 class DesignRules:
 
@@ -1903,38 +1812,6 @@ class Via:
                 continue
             args.append('%s=%s' % (attr, getattr(self, attr)))
         return '%s(%s)' % (self.__class__.__name__, ', '.join(sorted(args)))
-
-
-
-
-mm_per_inch = 25.4
-
-
-if False:
-    libraries = read_libraries(filename)
-    parts = read_placements(filename)
-    fixed_points = set()
-    for part in parts:
-        origin = part.origin
-        for point in libraries[part.library][part.footprint]:
-            point = Point2D(point.x, point.y)
-            if part.rotation != 0:
-                point.rotate(part.rotation * math.pi / 180.0)
-            if part.mirrored:
-                point.x = -point.x
-            fixed_points.add(origin + point)
-    commands = []
-    commands.append('display 48;')
-    commands.append('change layer 48;')
-    commands.append('grid mm;')
-    commands.append('change width 0.0254;')
-    radius = 0.010 / 0.0254
-    for p in fixed_points:
-        commands.append(('circle %s %s;' % (p, p + Point2D(radius, 0.0))).replace(',', ''))
-    script_filename = os.path.join(os.path.dirname(filename),
-                                   'show_fixed_points.scr')
-    with open(script_filename, 'w') as f:
-        f.write('\n'.join(commands))
 
 
 #snap_wires_to_grid(filename)

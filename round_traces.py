@@ -21,10 +21,10 @@ from point2d import Point2D
 # filename to modify
 L = []
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\micro_ohmmeter\micro_ohmmeter_rev5.brd'
-filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5.brd'
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\round_traces\round_traces_test.brd'
-filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5-rounded.brd'
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\teardrop_vias\teardrop_test.brd'
+filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5-rounded.brd'
+filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5.brd'
 
 mm_per_inch = 25.4
 
@@ -869,8 +869,9 @@ def round_signals(filename):
     # make smd pads locked points
     for part in parts:
         origin = part.origin
-        for point in libraries[part.library][part.footprint]:
-            point = Point2D(point.x, point.y)
+        footprint = libraries[part.library][part.footprint]
+        for point in [*footprint.pads, *footprint.smds]:
+            point = Point2D(point.origin.x, point.origin.y)
             if part.rotation != 0:
                 point.rotate(part.rotation * math.pi / 180.0)
             if part.mirrored:
@@ -1828,9 +1829,9 @@ def create_teardrop_vias(filename):
         for pad in pads:
             distance, point = get_nearest_point(pad.origin, wire_points)
             if distance > 0 and distance < pad_tolerance_mm:
-                print('Moving pad by %g' % distance)
+                # print('Moving pad by %g' % distance)
                 pad.origin = point
-        print(pads)
+        # print(pads)
         pths += pads
         # add through hold pads to pths
     print('Found %d total PTHs' % len(pths))
@@ -2125,7 +2126,7 @@ class Via:
 
 #snap_wires_to_grid(filename)
 
-# round_signals(filename)
+round_signals(filename)
 
 create_teardrop_vias(filename)
 

@@ -19,12 +19,13 @@ from xml.etree import ElementTree
 from point2d import Point2D
 
 # filename to modify
-L = []
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\micro_ohmmeter\micro_ohmmeter_rev5.brd'
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\round_traces\round_traces_test.brd'
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\teardrop_vias\teardrop_test.brd'
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5-rounded.brd'
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5.brd'
+filename = r'C:\Users\tdkostk\Documents\eagle\projects\sandia_cable_tester\sandia-cable-tester-rev5.brd'
+filename = r'C:\Users\tdkostk\Documents\eagle\projects\sandia_cable_tester\sandia-cable-tester-rev5-round.brd'
 
 mm_per_inch = 25.4
 
@@ -581,7 +582,8 @@ def get_angle_deviation(p1, p2, p3):
 def get_transition_distance(width_mm, angle):
     """Return the target distance to start the transition."""
     # target inner radius of trace as a ratio of trace width
-    target_inner_radius_mils = 20
+    # TODO: this value is not being respected
+    target_inner_radius_mils = 30
     # maximum distance the trace can move away from the original path (in mils)
     max_trace_deviation_mils = 5
     # target radius based on target inner radius
@@ -805,7 +807,7 @@ def round_signals(filename):
     # if True, will snap points close to the grid points
     snap_to_grid = True
     # tolerance for snapping points, in inces
-    snap_tolerance_inch= 1e-6
+    snap_tolerance_inch = 1e-6
     # grid spacing in inches
     grid_spacing_inches = 1e-3
     # minimum path segment to create
@@ -994,7 +996,7 @@ def round_signals(filename):
                             alpha = (target_length - length) / this_length
                             break
                         # if next point isn't a corner, we can't create the
-                        # teardrop TODO
+                        # teardrop
                         temp_point = last_point
                         last_point = next_point
                         length += this_length

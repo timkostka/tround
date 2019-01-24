@@ -26,6 +26,7 @@ filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-t
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5.brd'
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\sandia_cable_tester\sandia-cable-tester-rev5.brd'
 filename = r'C:\Users\tdkostk\Documents\eagle\projects\sandia_cable_tester\sandia-cable-tester-rev5-round.brd'
+filename = r'C:\Users\tdkostk\Documents\eagle\projects\round_traces\round_traces_test_2.brd'
 
 mm_per_inch = 25.4
 
@@ -201,39 +202,175 @@ class LibraryPackage:
         return '%s(%s)' % (self.__class__.__name__, ', '.join(sorted(args)))
 
 
-def get_package_points(package_xml):
-    """Return the smd and pad points within the given xml package."""
-    points = []
-    for item in package_xml:
-        if item.tag == 'smd':
-            x = float(item.attrib['x'])
-            y = float(item.attrib['y'])
-            points.append(Point2D(x, y))
-        elif item.tag == 'pad':
-            x = float(item.attrib['x'])
-            y = float(item.attrib['y'])
-            points.append(Point2D(x, y))
-    return points
+class Wire:
+
+    def __init__(self, wire, signal_name=None):
+        self.p1 = Point2D(float(wire.attrib['x1']), float(wire.attrib['y1']))
+        self.p2 = Point2D(float(wire.attrib['x2']), float(wire.attrib['y2']))
+        self.signal = signal_name
+        self.width = float(wire.attrib['width'])
+        self.layer = wire.attrib['layer']
+        if 'curve' in wire.attrib:
+            self.curve = float(wire.attrib['curve'])
+        else:
+            self.curve = 0.0
+
+    def get_other_point(self, point):
+        """Given one end point, return the other one."""
+        if self.p1 == point:
+            return self.p2
+        assert self.p2 == point
+        return self.p1
+
+    def get_curve_points(self):
+        """Return the center, radius, and starting angle of the curved Wire."""
+        assert self.curve != 0
+        distance = self.p1.distance_to(self.p2)
+        # sin(theta / 2) == (d / 2) / r
+        radius = distance / 2.0 / math.sin(self.curve / 2.0 * math.pi / 180.0)
+        radius = abs(radius)
+        midpoint = self.p1 + 0.5 * (self.p2 - self.p1)
+        normal = (self.p2 - self.p1).rotate(math.pi / 2.0)
+        normal.normalize()
+        delta = radius ** 2 - midpoint.distance_to(self.p2) ** 2
+        if delta < 0.0:
+            delta = 0.0
+        delta = math.sqrt(delta)
+        if self.curve > 0:
+            center = midpoint + normal * delta
+        else:
+            center = midpoint - normal * delta
+        start_angle = center.angle_to(self.p1)
+        return center, radius, start_angle
+
+    def get_distance_along(self, alpha):
+        """
+        Return the point and tangent alpha percent along the wire.
+
+        return is point, tangent
+
+        """
+        assert 0.0 <= alpha <= 1.0
+        # process straight line
+        if self.curve == 0.0:
+            point = self.p1 + alpha * (self.p2 - self.p1)
+            tangent = (self.p2 - self.p1).normalize()
+            return point, tangent
+        #
+        center, radius, start_angle = self.get_curve_points()
+        angle = start_angle + alpha * self.curve * math.pi / 180
+        point = center + radius * Point2D(math.cos(angle), math.sin(angle))
+        tangent = Point2D(math.cos(angle + math.pi / 2.0),
+                          math.sin(angle + math.pi / 2.0))
+        if self.curve < 0:
+            tangent = -tangent
+        return point, tangent
+
+    def reversed(self):
+        """Return an identical wire with the points reversed."""
+        wire = copy.copy(self)
+        wire.p1, wire.p2 = wire.p2, wire.p1
+        wire.curve = -wire.curve
+        return wire
+
+    def get_length(self):
+        """Return the length of this wire."""
+        if self.curve == 0.0:
+            return self.p1.distance_to(self.p2)
+        _, radius, _ = self.get_curve_points()
+        return radius * abs(self.curve) * math.pi / 180.0
+
+    def get_command(self):
+        """Return the command to recreate the wire."""
+        command = ('wire \'%s\' %.9f (%.9f %.9f)%s (%.9f %.9f);'
+                   % (self.signal if self.signal else '',
+                      self.width,
+                      self.p1.x,
+                      self.p1.y,
+                      '' if self.curve == 0.0 else '%+.3f ' % self.curve,
+                      self.p2.x,
+                      self.p2.y))
+        return command
+
+    def __repr__(self):
+        """Return a string representation."""
+        args = []
+        for attr in dir(self):
+            # skip hidden values/functions
+            if attr.startswith('_'):
+                continue
+            # skip all functions
+            if callable(getattr(self, attr)):
+                continue
+            args.append('%s=%s' % (attr, getattr(self, attr)))
+        return '%s(%s)' % (self.__class__.__name__, ', '.join(sorted(args)))
 
 
-def read_libraries(filename):
-    """Read and return fixed locations of packages within the file."""
-    tree = ElementTree.parse(filename)
-    root = tree.getroot()
-    libraries = dict()
-    # store DRU information
-    dru = dict()
-    for libraries_tag in root.iter('libraries'):
-        for library_tag in root.iter('library'):
-            library_name = library_tag.attrib['name']
-            assert library_name not in libraries
-            libraries[library_name] = dict()
-            packages = libraries[library_name]
-            for package_tag in library_tag.iter('package'):
-                name = package_tag.attrib['name']
-                assert name not in packages
-                packages[name] = LibraryPackage(package_tag)
-    return libraries
+class DesignRules:
+
+    def __init__(self, dru_xml):
+        self.name = dru_xml.attrib['name']
+        self.param = dict()
+        for param in dru_xml.iter('param'):
+            self.param[param.attrib['name']] = param.attrib['value']
+        # convert to mm where possible
+        units = dict()
+        units['mm'] = 1.0
+        units['mic'] = 0.001
+        units['mil'] = 0.0254
+        units['inch'] = 25.4
+        for key, value in self.param.items():
+            if ' ' in value:
+                continue
+            for unit in units.keys():
+                if value.endswith(unit):
+                    self.param[key] = float(value[:-len(unit)]) * units[unit]
+                    break
+            try:
+                self.param[key] = float(value)
+            except ValueError:
+                pass
+
+    def __repr__(self):
+        """Return a string representation."""
+        args = []
+        for attr in dir(self):
+            # skip hidden values/functions
+            if attr.startswith('_'):
+                continue
+            # skip all functions
+            if callable(getattr(self, attr)):
+                continue
+            args.append('%s=%s' % (attr, getattr(self, attr)))
+        return '%s(%s)' % (self.__class__.__name__, ', '.join(sorted(args)))
+
+
+class Via:
+
+    def __init__(self, via, signal_name):
+        self.signal = signal_name
+        self.origin = Point2D(float(via.attrib['x']), float(via.attrib['y']))
+        self.drill = float(via.attrib['drill'])
+        if 'diameter' in via.attrib:
+            self.diameter = float(via.attrib['diameter'])
+        else:
+            self.diameter = 0.0
+        self.inner_diameter = self.diameter
+        self.outer_diameter = self.diameter
+        self.extent = via.attrib['extent']
+
+    def __repr__(self):
+        """Return a string representation."""
+        args = []
+        for attr in dir(self):
+            # skip hidden values/functions
+            if attr.startswith('_'):
+                continue
+            # skip all functions
+            if callable(getattr(self, attr)):
+                continue
+            args.append('%s=%s' % (attr, getattr(self, attr)))
+        return '%s(%s)' % (self.__class__.__name__, ', '.join(sorted(args)))
 
 
 class Element:
@@ -269,6 +406,41 @@ class Element:
                    self.origin,
                    self.rotation,
                    self.mirrored))
+
+
+def get_package_points(package_xml):
+    """Return the smd and pad points within the given xml package."""
+    points = []
+    for item in package_xml:
+        if item.tag == 'smd':
+            x = float(item.attrib['x'])
+            y = float(item.attrib['y'])
+            points.append(Point2D(x, y))
+        elif item.tag == 'pad':
+            x = float(item.attrib['x'])
+            y = float(item.attrib['y'])
+            points.append(Point2D(x, y))
+    return points
+
+
+def read_libraries(filename):
+    """Read and return fixed locations of packages within the file."""
+    tree = ElementTree.parse(filename)
+    root = tree.getroot()
+    libraries = dict()
+    # store DRU information
+    dru = dict()
+    for libraries_tag in root.iter('libraries'):
+        for library_tag in root.iter('library'):
+            library_name = library_tag.attrib['name']
+            assert library_name not in libraries
+            libraries[library_name] = dict()
+            packages = libraries[library_name]
+            for package_tag in library_tag.iter('package'):
+                name = package_tag.attrib['name']
+                assert name not in packages
+                packages[name] = LibraryPackage(package_tag)
+    return libraries
 
 
 def read_elements(filename):
@@ -582,7 +754,6 @@ def get_angle_deviation(p1, p2, p3):
 def get_transition_distance(width_mm, angle):
     """Return the target distance to start the transition."""
     # target inner radius of trace as a ratio of trace width
-    # TODO: this value is not being respected
     target_inner_radius_mils = 30
     # maximum distance the trace can move away from the original path (in mils)
     max_trace_deviation_mils = 5
@@ -593,7 +764,6 @@ def get_transition_distance(width_mm, angle):
                         width_mm * (math.cos(angle / 2.0) - 1))
     radius_2 /= math.sin(angle / 4.0) ** 2
     length = min(radius_1, radius_2) * math.tan(angle / 2.0)
-    length = radius_2 * math.tan(angle / 2.0)
     return length
 
 
@@ -1062,7 +1232,7 @@ def round_signals(filename):
                 if dist is None or this_dist < dist:
                     dist = this_dist
             #print(point, dist)
-            if dist < 5 * native_resolution_mm:
+            if dist is not None and dist < 5 * native_resolution_mm:
                 continue
             if snapped_point(point) in locked_points:
                 continue
@@ -1132,6 +1302,8 @@ def round_signals(filename):
             rounded_distance[key] = target_distance
             # assert key not in adjacent_point
             # adjacent_point[key] = (p1, p3)
+        print(rounded_distance)
+        exit(0)
         for (layer, point) in junction_points:
             if not rounded_junctions:
                 break
@@ -1607,110 +1779,6 @@ def read_design_rules(filename):
         return DesignRules(dru_xml)
 
 
-class Wire:
-
-    def __init__(self, wire, signal_name=None):
-        self.p1 = Point2D(float(wire.attrib['x1']), float(wire.attrib['y1']))
-        self.p2 = Point2D(float(wire.attrib['x2']), float(wire.attrib['y2']))
-        self.signal = signal_name
-        self.width = float(wire.attrib['width'])
-        self.layer = wire.attrib['layer']
-        if 'curve' in wire.attrib:
-            self.curve = float(wire.attrib['curve'])
-        else:
-            self.curve = 0.0
-
-    def get_other_point(self, point):
-        """Given one end point, return the other one."""
-        if self.p1 == point:
-            return self.p2
-        assert self.p2 == point
-        return self.p1
-
-    def get_curve_points(self):
-        """Return the center, radius, and starting angle of the curved Wire."""
-        assert self.curve != 0
-        distance = self.p1.distance_to(self.p2)
-        # sin(theta / 2) == (d / 2) / r
-        radius = distance / 2.0 / math.sin(self.curve / 2.0 * math.pi / 180.0)
-        radius = abs(radius)
-        midpoint = self.p1 + 0.5 * (self.p2 - self.p1)
-        normal = (self.p2 - self.p1).rotate(math.pi / 2.0)
-        normal.normalize()
-        delta = radius ** 2 - midpoint.distance_to(self.p2) ** 2
-        if delta < 0.0:
-            delta = 0.0
-        delta = math.sqrt(delta)
-        if self.curve > 0:
-            center = midpoint + normal * delta
-        else:
-            center = midpoint - normal * delta
-        start_angle = center.angle_to(self.p1)
-        return center, radius, start_angle
-
-    def get_distance_along(self, alpha):
-        """
-        Return the point and tangent alpha percent along the wire.
-
-        return is point, tangent
-
-        """
-        assert 0.0 <= alpha <= 1.0
-        # process straight line
-        if self.curve == 0.0:
-            point = self.p1 + alpha * (self.p2 - self.p1)
-            tangent = (self.p2 - self.p1).normalize()
-            return point, tangent
-        #
-        center, radius, start_angle = self.get_curve_points()
-        angle = start_angle + alpha * self.curve * math.pi / 180
-        point = center + radius * Point2D(math.cos(angle), math.sin(angle))
-        tangent = Point2D(math.cos(angle + math.pi / 2.0),
-                          math.sin(angle + math.pi / 2.0))
-        if self.curve < 0:
-            tangent = -tangent
-        return point, tangent
-
-    def reversed(self):
-        """Return an identical wire with the points reversed."""
-        wire = copy.copy(self)
-        wire.p1, wire.p2 = wire.p2, wire.p1
-        wire.curve = -wire.curve
-        return wire
-
-    def get_length(self):
-        """Return the length of this wire."""
-        if self.curve == 0.0:
-            return self.p1.distance_to(self.p2)
-        _, radius, _ = self.get_curve_points()
-        return radius * abs(self.curve) * math.pi / 180.0
-
-    def get_command(self):
-        """Return the command to recreate the wire."""
-        command = ('wire \'%s\' %.9f (%.9f %.9f)%s (%.9f %.9f);'
-                   % (self.signal if self.signal else '',
-                      self.width,
-                      self.p1.x,
-                      self.p1.y,
-                      '' if self.curve == 0.0 else '%+.3f ' % self.curve,
-                      self.p2.x,
-                      self.p2.y))
-        return command
-
-    def __repr__(self):
-        """Return a string representation."""
-        args = []
-        for attr in dir(self):
-            # skip hidden values/functions
-            if attr.startswith('_'):
-                continue
-            # skip all functions
-            if callable(getattr(self, attr)):
-                continue
-            args.append('%s=%s' % (attr, getattr(self, attr)))
-        return '%s(%s)' % (self.__class__.__name__, ', '.join(sorted(args)))
-
-
 def read_wires(filename):
     """Return all wires in the file."""
     tree = ElementTree.parse(filename)
@@ -2067,63 +2135,6 @@ def create_teardrop_vias(filename):
     with open(script_filename, 'w') as f:
         f.write('\n'.join(commands))
     print('\nScript generated at %s' % (script_filename))
-
-
-class DesignRules:
-
-    def __init__(self, dru_xml):
-        self.name = dru_xml.attrib['name']
-        self.param = dict()
-        for param in dru_xml.iter('param'):
-            self.param[param.attrib['name']] = param.attrib['value']
-        # convert to mm where possible
-        units = dict()
-        units['mm'] = 1.0
-        units['mic'] = 0.001
-        units['mil'] = 0.0254
-        units['inch'] = 25.4
-        for key, value in self.param.items():
-            if ' ' in value:
-                continue
-            for unit in units.keys():
-                if value.endswith(unit):
-                    self.param[key] = float(value[:-len(unit)]) * units[unit]
-                    break
-            try:
-                self.param[key] = float(value)
-            except ValueError:
-                pass
-
-    def __repr__(self):
-        return 'DesignRules(name=%s, param=%s)' % (self.name, self.param)
-
-
-class Via:
-
-    def __init__(self, via, signal_name):
-        self.signal = signal_name
-        self.origin = Point2D(float(via.attrib['x']), float(via.attrib['y']))
-        self.drill = float(via.attrib['drill'])
-        if 'diameter' in via.attrib:
-            self.diameter = float(via.attrib['diameter'])
-        else:
-            self.diameter = 0.0
-        self.inner_diameter = self.diameter
-        self.outer_diameter = self.diameter
-        self.extent = via.attrib['extent']
-
-    def __repr__(self):
-        """Return a string representation."""
-        args = []
-        for attr in dir(self):
-            # skip hidden values/functions
-            if attr.startswith('_'):
-                continue
-            # skip all functions
-            if callable(getattr(self, attr)):
-                continue
-            args.append('%s=%s' % (attr, getattr(self, attr)))
-        return '%s(%s)' % (self.__class__.__name__, ', '.join(sorted(args)))
 
 
 #snap_wires_to_grid(filename)

@@ -660,7 +660,7 @@ def create_signal(p1, a1, p2, a2, signal, width):
     assert abs(cw_test) < 1e-6 or abs(ccw_test) < 1e-6
     if abs(cw_test) < abs(ccw_test):
         curve = -curve
-    command = ('line \'%s\' %s (%s %s) %s (%s %s);'
+    command = ('wire \'%s\' %s (%s %s) %s (%s %s);'
                % (signal,
                   width,
                   format_position(p1.x),
@@ -713,7 +713,7 @@ def get_wire_command(wire, signal_name):
         if not curve.startswith('-'):
             curve = '+' + curve
         curve += ' '
-    command = ('line \'%s\' %s (%s %s) %s(%s %s);'
+    command = ('wire \'%s\' %s (%s %s) %s(%s %s);'
                % (signal_name,
                   wire.attrib['width'],
                   wire.attrib['x1'],
@@ -726,7 +726,7 @@ def get_wire_command(wire, signal_name):
 
 def generate_wire_command(signal_name, width, p1, p2):
     """Return the string command to create the given straight wire."""
-    command = ('line \'%s\' %s (%s %s) (%s %s);'
+    command = ('wire \'%s\' %s (%s %s) (%s %s);'
                % (signal_name,
                   width,
                   format_position(p1.x),
@@ -850,7 +850,7 @@ def create_teardrop(joining_point,
     a3 = (end_angle_3 - start_angle_3) * 180 / math.pi
     a3 = ((a3 + 180) % 360) - 180
     # add initial line
-    commands.append('line \'%s\' %s (%s %s) %s (%s %s);'
+    commands.append('wire \'%s\' %s (%s %s) %s (%s %s);'
                     % (signal,
                        width,
                        format_position(joining_point.x),
@@ -881,7 +881,7 @@ def create_teardrop(joining_point,
                        format_position(joining_point.y)))
         commands.append(polygon)
     else:
-        commands.append('line \'%s\' %s (%s %s) %s (%s %s);'
+        commands.append('wire \'%s\' %s (%s %s) %s (%s %s);'
                         % (signal,
                            width,
                            format_position(joining_point.x),
@@ -889,7 +889,7 @@ def create_teardrop(joining_point,
                            format_angle(a1),
                            format_position(p1.x),
                            format_position(p1.y)))
-        commands.append('line \'%s\' %s (%s %s) %s (%s %s);'
+        commands.append('wire \'%s\' %s (%s %s) %s (%s %s);'
                         % (signal,
                            width,
                            format_position(joining_point.x),
@@ -935,7 +935,6 @@ def round_signals(filename):
     create_polygons_in_junctions = True
     # if True, traces will also be output in junctions to avoid wire stub DRC
     # errors
-    # TODO: implement this
     create_traces_in_junctions = True
     # shortest possible nonzero wire length (native Eagle resolution)
     native_resolution_mm = 3.125e-6
@@ -1174,7 +1173,7 @@ def round_signals(filename):
             these_wires.sort()
             last_wire = list(these_wires[0])
             last_wire[0] += 2.0 * math.pi
-            these_wires.append(last_wire)
+            these_wires.append(tuple(last_wire))
             # get target radius based on our settings
             target_distance = float('inf')
             # target_radius = wire_width + target_inner_radius_mils * 0.0254
@@ -1276,18 +1275,31 @@ def round_signals(filename):
                     angle = math.pi - angle
                     segments.append((p2a, -angle * 180.0 / math.pi))
                 # create polygon command
-                command = ('polygon \'%s\' %s (%s %s)'
-                           % (signal_name,
-                              corner_width[(layer, p2)],
-                              format_position(segments[-1][0].x),
-                              format_position(segments[-1][0].y)))
-                for i in range(len(segments)):
-                    command += (' %s (%s %s)'
-                                % (format_angle(segments[i - 1][1]),
-                                   format_position(segments[i][0].x),
-                                   format_position(segments[i][0].y)))
-                command += ';'
-                wires_by_layer[layer].append(command)
+                if create_polygons_in_junctions:
+                    command = ('polygon \'%s\' %s (%s %s)'
+                               % (signal_name,
+                                  corner_width[(layer, p2)],
+                                  format_position(segments[-1][0].x),
+                                  format_position(segments[-1][0].y)))
+                    for i in range(len(segments)):
+                        command += (' %s (%s %s)'
+                                    % (format_angle(segments[i - 1][1]),
+                                       format_position(segments[i][0].x),
+                                       format_position(segments[i][0].y)))
+                    command += ';'
+                    wires_by_layer[layer].append(command)
+                if (create_polygons_in_junctions or
+                        create_traces_in_junctions):
+                    for i in range(len(segments) - 1):
+                        command = ('wire \'%s\' %s (%s %s) %s (%s %s);'
+                                   % (signal_name,
+                                      corner_width[(layer, p2)],
+                                      format_position(segments[i][0].x),
+                                      format_position(segments[i][0].y),
+                                      format_angle(segments[i][1]),
+                                      format_position(segments[i + 1][0].x),
+                                      format_position(segments[i + 1][0].y)))
+                        wires_by_layer[layer].append(command)
                 continue
             for i in range(len(points) - 1):
                 p1, p3 = points[i], points[i + 1]

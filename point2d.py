@@ -61,7 +61,8 @@ class Point2D:
     def normalize(self):
         d = self.norm()
         if d != 0:
-            self /= d
+            self.x /= d
+            self.y /= d
         return self
 
     def __lt__(self, other):

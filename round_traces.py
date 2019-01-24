@@ -12,21 +12,25 @@ Process for creating rounded traces:
 
 import os
 import copy
-import pdb
 import math
 from xml.etree import ElementTree
 
 from point2d import Point2D
 
-# filename to modify
-filename = r'C:\Users\tdkostk\Documents\eagle\projects\micro_ohmmeter\micro_ohmmeter_rev5.brd'
-filename = r'C:\Users\tdkostk\Documents\eagle\projects\round_traces\round_traces_test.brd'
-filename = r'C:\Users\tdkostk\Documents\eagle\projects\teardrop_vias\teardrop_test.brd'
-filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5-rounded.brd'
-filename = r'C:\Users\tdkostk\Documents\eagle\projects\kct-tester\sandia-cable-tester-rev5.brd'
-filename = r'C:\Users\tdkostk\Documents\eagle\projects\sandia_cable_tester\sandia-cable-tester-rev5.brd'
-filename = r'C:\Users\tdkostk\Documents\eagle\projects\sandia_cable_tester\sandia-cable-tester-rev5-round.brd'
-filename = r'C:\Users\tdkostk\Documents\eagle\projects\round_traces\round_traces_test_2.brd'
+# hold path to Eagle projects
+project_directory = r'C:\Users\tdkostk\Documents\eagle\projects'
+
+# project and filename to modify
+# board_file = r'\micro_ohmmeter\micro_ohmmeter_rev5.brd'
+# board_file = r'\round_traces\round_traces_test.brd'
+# board_file = r'\teardrop_vias\teardrop_test.brd'
+# board_file = r'\kct-tester\sandia-cable-tester-rev5-rounded.brd'
+# board_file = r'\kct-tester\sandia-cable-tester-rev5.brd'
+# board_file = r'\sandia_cable_tester\sandia-cable-tester-rev5.brd'
+# board_file = r'\sandia_cable_tester\sandia-cable-tester-rev5-round.brd'
+board_file = r'\round_traces\round_traces_test_2.brd'
+
+board_file = project_directory + board_file
 
 mm_per_inch = 25.4
 
@@ -179,14 +183,8 @@ class LibraryPackage:
         for item in package_xml:
             if item.tag == 'smd':
                 self.smds.append(SMD(item))
-                #x = float(item.attrib['x'])
-                #y = float(item.attrib['y'])
-                #points.append(Point2D(x, y))
             elif item.tag == 'pad':
                 self.pads.append(Pad(item))
-                #x = float(item.attrib['x'])
-                #y = float(item.attrib['y'])
-                #points.append(Point2D(x, y))
 
     def __repr__(self):
         """Return a string representation."""
@@ -428,10 +426,8 @@ def read_libraries(filename):
     tree = ElementTree.parse(filename)
     root = tree.getroot()
     libraries = dict()
-    # store DRU information
-    dru = dict()
     for libraries_tag in root.iter('libraries'):
-        for library_tag in root.iter('library'):
+        for library_tag in libraries_tag.iter('library'):
             library_name = library_tag.attrib['name']
             assert library_name not in libraries
             libraries[library_name] = dict()
@@ -512,8 +508,6 @@ def delete_via_teardrops(filename):
     # hold all wires that were added during the teardropping step
     teardrop_wires = []
     for signal in root.iter('signal'):
-        # read in all wires
-        wires = []
         # store vias
         vias = dict()
         # store number of wires at each point and layer
@@ -626,26 +620,20 @@ def delete_via_teardrops(filename):
     # print('\n'.join(commands))
     with open(script_filename, 'w') as f:
         f.write('\n'.join(commands))
-    print('\nScript generated at %s' % (script_filename))
+    print('\nScript generated at %s' % script_filename)
 
 
 def find_all_via_points(filename):
     """Return a list of all vias in the given board file."""
     tree = ElementTree.parse(filename)
     root = tree.getroot()
+    # stora vias
     vias = list()
     for signal in root.iter('signal'):
-        # read in all wires
-        wires = []
-        # store number of wires at each point and layer
-        wires_at_point = dict()
-        # store wires
-        wires = list()
-        for child in signal:
-            if child.tag == 'via':
-                point = Point2D(float(child.attrib['x']),
-                                float(child.attrib['y']))
-                vias.append(point)
+        for via_xml in signal.iter('via'):
+            point = Point2D(float(via_xml.attrib['x']),
+                            float(via_xml.attrib['y']))
+            vias.append(point)
     return vias
 
 
@@ -755,14 +743,6 @@ def wire_command_sort(command):
     points = [x[:x.index(')')] for x in points]
     points = [Point2D(*[float(x) for x in p.split()]) for p in points]
     return sorted(points)[-1]
-    p1, p2 = points
-    # print(points)
-    # exit(1)
-    # p1
-    if p1 < p2:
-        return p2
-    else:
-        return p1
 
 
 def get_angle_deviation(p1, p2, p3):
@@ -832,11 +812,6 @@ def create_teardrop(joining_point,
         d3 = 1e100
     else:
         d3 = via.dot(via) / d3
-    # print('\nd1=%s, d2=%s, d3=%s' % (d1, d2, d3))
-    # print('t=%s, n=%s' % (tangent, normal))
-    start_angle_1 = via.angle() + math.pi / 2.0
-    start_angle_2 = via.angle() + math.pi / 2.0
-    start_angle_3 = via.angle() + math.pi / 2.0
     start_angle_1 = tangent.angle() + math.pi / 2.0
     start_angle_2 = tangent.angle() + math.pi / 2.0
     start_angle_3 = tangent.angle() + math.pi / 2.0
@@ -864,8 +839,6 @@ def create_teardrop(joining_point,
         p2 = p2 + radius * Point2D(math.cos(end_angle_2), math.sin(end_angle_2))
     else:
         p2 = p2 - radius * Point2D(math.cos(end_angle_2), math.sin(end_angle_2))
-    # print('d2=%g, dp2=%g' % (d2, center.distance_to(p2)))
-    # print('ea1=%s, ea2=%s' % (end_angle_1 * 180 / math.pi, end_angle_2 * 180 / math.pi))
     commands = []
     # end_angle_1 = math.atan2(via_point - d1 * normal)
     # end_angle_2 = math.atan2(via_point - d2 * normal)
@@ -887,9 +860,6 @@ def create_teardrop(joining_point,
                        format_position(via_point.y)))
     # add polygon or lines
     if polygon_teardrop:
-        a3 = via_point.angle_to(p2) - via_point.angle_to(p1)
-        a3 *= 180.0 / math.pi
-        a3 = ((a3 + 180.0) % 360.0) - 180.0
         polygon = ('polygon \'%s\' %s (%s %s) %s (%s %s)'
                    % (signal,
                       width,
@@ -960,37 +930,13 @@ def round_signals(filename):
                                    'round_signals.scr')
     # if True, will also round corners of 3+ wire junctions
     rounded_junctions = True
-    # if True, will round corners
-    round_corners = True
-    # if True, will enlarge copper traces onto the tPlace plane to help
-    # visualize the margin
-    # enlarge_to_tplace = True
-    # maximum trace width to modify (in mils)
-    # min_trace_width_mils = 10
-    # target inner radius of trace as a ratio of trace width
-    # target_inner_radius_ratio = 1.0
     # if True, polygons will be created for multi-wire junctions
     # else, simple traces will be used
     create_polygons_in_junctions = True
     # if True, traces will also be output in junctions to avoid wire stub DRC
     # errors
+    # TODO: implement this
     create_traces_in_junctions = True
-    # if True, create teardrop shapes for vias
-    create_teardrop_vias = False
-    # if True, will snap points close to the grid points
-    snap_to_grid = True
-    # tolerance for snapping points, in inces
-    snap_tolerance_inch = 1e-6
-    # grid spacing in inches
-    grid_spacing_inches = 1e-3
-    # minimum path segment to create
-    # min_segment_length_mils = 5
-    # target inner radius of trace as a ratio of trace width
-    # target_inner_radius_mils = 20
-    # maximum distance the trace can move away from the original path (in mils)
-    # max_trace_deviation_mils = 3
-    # minimum length of path segment to keep
-    # min_remaining_segment_mils = 5
     # shortest possible nonzero wire length (native Eagle resolution)
     native_resolution_mm = 3.125e-6
     # if a wire is shorter than this, ignore it
@@ -1029,13 +975,7 @@ def round_signals(filename):
     # commands.append('set undo_log off;')
     commands.append('set wire_bend 2;')
     commands.append('grid mm;')
-    # hold straight segments of wire that can be rounded
-    # * must be same width
-    # * intersections have exactly 2 traces
-    # hold all special points which cannot be moved (vias, pads)
-    # locked_points = set(find_all_via_points(filename))
-    # hold wires by signal
-    # wires_by_signal = dict()
+    # hold points which should not be moved
     base_locked_points = set()
     # read footprints from board file
     libraries = read_libraries(filename)
@@ -1059,7 +999,7 @@ def round_signals(filename):
     print('Finding all signal wires.')
     for signal in root.iter('signal'):
         signal_name = signal.attrib['name']
-        print('\nIn signal %s:' % (signal_name))
+        print('\nIn signal %s:' % signal_name)
         # if signal_name not in wires_by_signal:
         #    wires_by_signal[signal_name] = []
         # store via points
@@ -1129,88 +1069,6 @@ def round_signals(filename):
             new_points = [x[1] for x in items]
             new_adjacent_points[(layer, p)] = new_points
         adjacent_points = new_adjacent_points
-        # create teardrops for vias
-        if create_teardrop_vias:
-            # loop over all vias
-            for (layer, via_point), other_points in adjacent_points.items():
-                if via_point not in via_points:
-                    continue
-                # get diameter of this via
-                if 'diameter' in vias[via_point]:
-                    diameter = float(vias[via_point]['diameter'])
-                else:
-                    diameter = 0.0
-                # increase based on DRU rules
-                drill = float(vias[via_point]['drill'])
-                if layer == '1' or layer == '16':
-                    dru_diameter = drill * float(dru['rvViaOuter'])
-                    dru_diameter = max(dru_diameter, dru['rlMinViaOuter'])
-                    dru_diameter = min(dru_diameter, dru['rlMaxViaOuter'])
-                else:
-                    dru_diameter = drill * float(dru['rvViaInner'])
-                    dru_diameter = max(dru_diameter, dru['rlMinViaInner'])
-                    dru_diameter = min(dru_diameter, dru['rlMaxViaInner'])
-                diameter = max(diameter, dru_diameter)
-                wire_width = 0.254
-                joining_radius = (diameter - wire_width) / 2.0
-                # for each wire coming off of a via, create a teardrop
-                for next_point in other_points:
-                    length = 0.0
-                    last_point = via_point
-                    success = False
-                    # find the target distance away from the via
-                    target_length = 0.030 / 0.0254
-                    # length of path so far
-                    while True:
-                        # get length to next point
-                        this_length = (next_point - last_point).norm()
-                        if length + this_length > target_length:
-                            success = True
-                            alpha = (target_length - length) / this_length
-                            break
-                        # if next point isn't a corner, we can't create the
-                        # teardrop
-                        temp_point = last_point
-                        last_point = next_point
-                        length += this_length
-                        # find next point
-                        next_points = adjacent_points[(layer, last_point)]
-                        if len(next_points) != 2:
-                            print('Can\'t create teardrop on via')
-                            success = False
-                            break
-                        if next_points[0] == temp_point:
-                            next_point = next_points[1]
-                        else:
-                            assert next_points[1] == temp_point
-                            next_point = next_points[0]
-                    if not success:
-                        continue
-                    # create teardrop
-
-                    # def create_teardrop(joining_point,
-                    #                    tangent,
-                    #                    via_point,
-                    #                    radius,
-                    #                    signal,
-                    #                    layer,
-                    #                    width)
-                    assert 0 <= alpha <= 1.0
-                    teardrop_point = last_point + alpha * (next_point - last_point)
-                    tangent = (last_point - next_point).normalize()
-                    # normal = Point2D(tangent.y, -tangent.x)
-                    print('Creating teardrop from %s to %s'
-                          % (teardrop_point, via_point))
-                    new_commands = create_teardrop(teardrop_point,
-                                                   tangent,
-                                                   via_point,
-                                                   joining_radius,
-                                                   signal_name,
-                                                   layer,
-                                                   wire_width)
-                    if layer not in wires_by_layer:
-                        wires_by_layer[layer] = []
-                    wires_by_layer[layer].extend(new_commands)
         # hold corner points (2 wires joining)
         corner_points = set()
         # hold wire widths at corner
@@ -1234,7 +1092,6 @@ def round_signals(filename):
                 this_dist = point.distance_to(p)
                 if dist is None or this_dist < dist:
                     dist = this_dist
-            #print(point, dist)
             if dist is not None and dist < 5 * native_resolution_mm:
                 continue
             if snapped_point(point) in locked_points:
@@ -1289,24 +1146,11 @@ def round_signals(filename):
             if theta * 180.0 / math.pi < 5.0:
                 continue
             target_distance = get_transition_distance(wire_width, theta)
-            # get maximum radius constraint based on path deviation
-            # original_deviation = wire_width / (2.0 * math.cos(theta / 2.0))
-            # max_target_radius = max_trace_deviation_mils * 0.0254
-            # max_target_radius += original_deviation
-            # max_target_radius -= wire_width / 2.0
-            # max_target_radius /= (1.0 / math.cos(theta / 2.0) - 1.0)
-            # if target_radius > max_target_radius:
-            #    target_radius = max_target_radius
-            # target_distance = target_radius * math.tan(theta / 2.0)
-            # if target_distance > max_distance:
-            #    target_distance = max_distance
             key = (layer, p2)
             assert key not in rounded_distance
             rounded_distance[key] = target_distance
             # assert key not in adjacent_point
             # adjacent_point[key] = (p1, p3)
-        # print(rounded_distance)
-        # exit(0)
         for (layer, point) in junction_points:
             if not rounded_junctions:
                 break
@@ -1330,7 +1174,7 @@ def round_signals(filename):
             these_wires.sort()
             last_wire = list(these_wires[0])
             last_wire[0] += 2.0 * math.pi
-            these_wires.append(tuple(last_wire))
+            these_wires.append(last_wire)
             # get target radius based on our settings
             target_distance = float('inf')
             # target_radius = wire_width + target_inner_radius_mils * 0.0254
@@ -1351,13 +1195,6 @@ def round_signals(filename):
                     continue
                 this_distance = get_transition_distance(wire_width, theta)
                 target_distance = min(target_distance, this_distance)
-                # original_deviation = wire_width / (2.0 * math.cos(theta / 2.0))
-                # max_target_radius = max_trace_deviation_mils * 0.0254
-                # max_target_radius += original_deviation
-                # max_target_radius -= wire_width / 2.0
-                # max_target_radius /= (1.0 / math.cos(theta / 2.0) - 1.0)
-                # if target_radius > max_target_radius:
-                #    target_radius = max_target_radius
             # target_distance = target_radius * math.tan(theta / 2.0)
             key = (layer, point)
             assert key not in rounded_distance
@@ -1433,13 +1270,10 @@ def round_signals(filename):
                     a1 = (p1 - p2).normalize()
                     a2 = (p3 - p2).normalize()
                     p2a = p2 + a1 * distance
-                    p2b = p2 + a2 * distance
                     angle = a2.angle() - a1.angle()
                     if angle < 0.0:
                         angle += 2.0 * math.pi
                     angle = math.pi - angle
-                    # angle = math.acos(max(min(a1.dot(a2), 1.0), -1.0))
-                    # angle = math.pi - angle
                     segments.append((p2a, -angle * 180.0 / math.pi))
                 # create polygon command
                 command = ('polygon \'%s\' %s (%s %s)'
@@ -1447,10 +1281,6 @@ def round_signals(filename):
                               corner_width[(layer, p2)],
                               format_position(segments[-1][0].x),
                               format_position(segments[-1][0].y)))
-                if signal_name == 'N$15':
-                    print(points)
-                    print(segments)
-                    # exit(1)
                 for i in range(len(segments)):
                     command += (' %s (%s %s)'
                                 % (format_angle(segments[i - 1][1]),
@@ -1496,23 +1326,7 @@ def round_signals(filename):
     commands.append('group (>0 0);')
     with open(script_filename, 'w') as f:
         f.write('\n'.join(commands))
-    print('\nScript generated at %s' % (script_filename))
-    # print('\n' * 3)
-    # print('\n'.join(commands))
-
-
-def get_wires_by_signal(filename):
-    """Return the wires sorted by signal from the given file."""
-    tree = ElementTree.parse(filename)
-    root = tree.getroot()
-    wire_by_layer = dict()
-    # store DRU information
-    dru = dict()
-    for signals in root.iter('signals'):
-        for signal in signals.iter('signal'):
-            name = signal.attrib['name']
-            for wire in signal.iter('wire'):
-                pass
+    print('\nScript generated at %s' % script_filename)
 
 
 def snap_wires_to_grid(filename, tolerance_inch=1e-6, spacing_inch=1e-3):
@@ -1521,10 +1335,6 @@ def snap_wires_to_grid(filename, tolerance_inch=1e-6, spacing_inch=1e-3):
     # number of wire endpoints on-grid/snapped/off-grid
     snapped_wires = [0, 0, 0]
     snapped_vias = [0, 0, 0]
-    # native resolution in mm
-    native_resolution_mm = 3.125e-6
-    # max digits per coord
-    #decimal_place_resolution = 8
     # hold commands to redraw all wires
     commands = []
     commands.append('set optimizing off;')
@@ -1540,11 +1350,8 @@ def snap_wires_to_grid(filename, tolerance_inch=1e-6, spacing_inch=1e-3):
     tree = ElementTree.parse(filename)
     root = tree.getroot()
     wires_by_layer = dict()
-    # store DRU information
-    dru = dict()
     for signals in root.iter('signals'):
         for signal in signals.iter('signal'):
-            name = signal.attrib['name']
             for wire in signal.iter('wire'):
                 on_grid = True
                 x1 = float(wire.attrib['x1'])
@@ -1625,10 +1432,8 @@ def snap_wires_to_grid(filename, tolerance_inch=1e-6, spacing_inch=1e-3):
                     p = p_grid
                 else:
                     on_grid = False
-                x = math.floor(p.x / native_resolution_mm + 0.5) * native_resolution_mm
-                x = '%.9f' % x
-                y = math.floor(p.x / native_resolution_mm + 0.5) * native_resolution_mm
-                y = '%.9f' % y
+                x = format_position(p.x)
+                y = format_position(p.x)
                 if (float(x) == float(via.attrib['x']) and
                         float(y) == float(via.attrib['y'])):
                     if on_grid:
@@ -1641,9 +1446,9 @@ def snap_wires_to_grid(filename, tolerance_inch=1e-6, spacing_inch=1e-3):
                            % (signal.attrib['name'],
                               x,
                               y))
-                if wire.attrib['layer'] not in wires_by_layer:
-                    wires_by_layer[wire.attrib['layer']] = []
-                wires_by_layer[wire.attrib['layer']].append(command)
+                if '1' not in wires_by_layer:
+                    wires_by_layer['1'] = []
+                wires_by_layer['1'].append(command)
     # print summary
     print('Wire summary:')
     print('- Already on grid: %d' % snapped_wires[0])
@@ -1677,9 +1482,6 @@ def snap_wires_to_grid(filename, tolerance_inch=1e-6, spacing_inch=1e-3):
 
 def read_vias(filename, dru=None):
     """Read and return vias from the given file."""
-    # search through the XML tree
-    tree = ElementTree.parse(filename)
-    root = tree.getroot()
     # hold all vias
     vias = []
     # search through the XML tree
@@ -1687,7 +1489,6 @@ def read_vias(filename, dru=None):
     root = tree.getroot()
     for signals in root.iter('signals'):
         for signal in signals.iter('signal'):
-            name = signal.attrib['name']
             for via in signal.iter('via'):
                 vias.append(Via(via, signal_name=signal.attrib['name']))
     # if a DRU is defined, figure out the true of each via
@@ -1731,13 +1532,10 @@ def read_contact_refs(filename):
     return contact_ref
 
 
-def read_pad_pths(filename, dru=None):
+def read_pad_pths(filename):
     """Read and return pths created by pads from the given file."""
     # hold all pths
     pths = []
-    # search through the XML tree
-    tree = ElementTree.parse(filename)
-    root = tree.getroot()
     # read footprints from board file
     libraries = read_libraries(filename)
     # read in DRU
@@ -1817,10 +1615,10 @@ def find_point_on_chain(wire_chain, via_point, target_distance):
         assert not backwards
         low = 0.0
         high = 1.0
-        while low != high:
+        while True:
             test = (low + high) / 2.0
             point, tangent = wire.get_distance_along(test)
-            if test == low or test == high:
+            if test == high or test == low or test == high:
                 break
             if via_point.distance_to(point) < target_distance:
                 if backwards:
@@ -1916,20 +1714,12 @@ def create_teardrop_vias(filename):
         wire_count[point] = wire_count.get(point, 0) + 1
         point = (wire.layer, wire.p2)
         wire_count[point] = wire_count.get(point, 0) + 1
-    # points with other than 2 wires are fixed points
-    end_points = set(key for key, value in wire_count.items() if value != 2)
     # via points are also fixed
     via_points = set(via.origin for via in pths)
     # store points that are midway through a wire chain
     mid_points = set(key
                      for key, value in wire_count.items()
                      if value == 2 and key[1] not in via_points)
-    # print('Point breakdown:')
-    # print('- Found %d wires.' % len(wires))
-    # print('- Found %d wire chain end points.' % len(end_points))
-    # print('- Found %d via points.' % len(via_points))
-    # print('- Found %d mid points.' % len(mid_points))
-    # print(mid_points)
     # store wires by layer/point
     wire_by_point = dict()
     for wire in wires:
@@ -1942,18 +1732,12 @@ def create_teardrop_vias(filename):
         wire_by_point[point].append(wire)
         point = (wire.layer, wire.p2)
         wire_by_point[point].append(wire)
-    # print('wire_by_point:')
-    for key, value in wire_by_point.items():
-        pass
-        # print('- %s: %s' % (key, value))
     # get map from point to via
     via_at_point = dict()
     for via in pths:
         assert via.origin not in via_at_point
         via_at_point[via.origin] = via
-    # figure out wire chains starting at pths
-    # wire_chain[(1, Point2D(0, 0))] = [Wire(...), Wire(...)]
-    # wire_chains[0] = [(1, Point2D(0, 0)), Wire(...), Wire(...)]
+    # hold wire chains which begin at vias
     wire_chains = []
     # hold wires which are used in chains
     used_wires = set()
@@ -1971,9 +1755,6 @@ def create_teardrop_vias(filename):
                 assert p == wire.p2
                 this_chain[0] = wire.reversed()
                 assert this_chain[0].p1 == p
-            #wire_chains[point] = [wire]
-            #this_chain = wire_chains[point]
-            #new_point = (wire.layer, wire.get_other_point(point[1]))
             while (layer, this_chain[-1].p2) in mid_points:
                 new_wires = wire_by_point[(layer, this_chain[-1].p2)]
                 assert len(new_wires) == 2
@@ -1990,15 +1771,7 @@ def create_teardrop_vias(filename):
                     this_chain[-1] = this_chain[-1].reversed()
                 else:
                     assert this_chain[-1].p1 == this_chain[-2].p2
-                #new_point = (new_point[0],
-                #             this_chain[-1].get_other_point(new_point[1]))
-    # print('- Found %d wire chains.' % len(wire_chains))
-    # for x in wire_chains:
-        # print(x)
-    # print('- Wire chain lengths: %s' % [sum(x.get_length() for x in chain)
-    #                                     for chain in wire_chains])
     unused_wires = [wire for wire in wires if wire not in used_wires]
-    # print('- Found %d wires not found in chains' % len(unused_wires))
     # change wires within each chain such that points are sorted
     # [wire1, wire2, wire3, ...]
     # via at wire1.p1 with wire1.p2 == wire2.p1, etc.
@@ -2064,19 +1837,12 @@ def create_teardrop_vias(filename):
         r2 = teardrop_inner_diameter_mm + wire_width / 2.0
         d = math.sqrt((r1 + r2) ** 2 - (r2 + wire_width / 2.0) ** 2)
         result = find_point_on_chain(chain, via_point, d)
-        # print(result)
         # if chain is not long enough, ignore it
         if result is None:
-            # print('- Chain short but usable: %s' % chain)
             # use end of chain
-            # print(chain[-1].get_distance_along(1.0))
-            result = [list(chain[-1].get_distance_along(1.0)), (len(chain) - 1, 1.0)]
-            # print(result)
-            # print(result)
-            # print(result)
+            result = [list(chain[-1].get_distance_along(1.0)),
+                      (len(chain) - 1, 1.0)]
             result[0][1] = -result[0][1]
-            #continue
-        # print(result)
         (junction_point, tangent), (wire_index, alpha) = result
         teardrop_commands = create_teardrop(junction_point,
                                             tangent,
@@ -2085,7 +1851,6 @@ def create_teardrop_vias(filename):
                                             via.signal,
                                             chain[0].width,
                                             polygon_teardrop=create_polygons)
-        # print('- Added %d teardrop wires' % len(teardrop_commands))
         # delete portion of chain between via and junction point
         layer = chain[0].layer
         chain[:] = chain[wire_index:]
@@ -2094,7 +1859,6 @@ def create_teardrop_vias(filename):
         elif alpha > 0:
             point, _ = chain[0].get_distance_along(alpha)
             chain[0].curve *= 1.0 - alpha
-            #chain[0].p1 = point
             chain[0].p1 = junction_point
         # for x in teardrop_commands:
         #     print(x)
@@ -2104,8 +1868,8 @@ def create_teardrop_vias(filename):
         # print(via_point, junction_point)
     # add wires in chains
     for chain in wire_chains:
-        if wire.layer not in wires_by_layer:
-            wires_by_layer[wire.layer] = []
+        if chain[0].layer not in wires_by_layer:
+            wires_by_layer[chain[0].layer] = []
         for wire in chain:
             # wires_by_layer[wire.layer].append(wire.get_command(signal_name=wire.signal))
             wires_by_layer[wire.layer].append(wire.get_command())
@@ -2133,13 +1897,13 @@ def create_teardrop_vias(filename):
                                    'create_teardrops.scr')
     with open(script_filename, 'w') as f:
         f.write('\n'.join(commands))
-    print('\nScript generated at %s' % (script_filename))
+    print('\nScript generated at %s' % script_filename)
 
 
-#snap_wires_to_grid(filename)
+# snap_wires_to_grid(board_file)
 
-round_signals(filename)
+round_signals(board_file)
 
-create_teardrop_vias(filename)
+create_teardrop_vias(board_file)
 
-# delete_via_teardrops(filename)
+# delete_via_teardrops(board_file)

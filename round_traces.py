@@ -282,14 +282,14 @@ class Wire:
 
     def get_command(self):
         """Return the command to recreate the wire."""
-        command = ('wire \'%s\' %.9f (%.9f %.9f)%s (%.9f %.9f);'
+        command = ('wire \'%s\' %s (%s %s)%s (%s %s);'
                    % (self.signal if self.signal else '',
-                      self.width,
-                      self.p1.x,
-                      self.p1.y,
-                      '' if self.curve == 0.0 else '%+.3f ' % self.curve,
-                      self.p2.x,
-                      self.p2.y))
+                      format_position(self.width),
+                      format_position(self.p1.x),
+                      format_position(self.p1.y),
+                      '' if self.curve == 0.0 else format_angle(self.curve),
+                      format_position(self.p2.x),
+                      format_position(self.p2.y)))
         return command
 
     def __repr__(self):
@@ -675,17 +675,40 @@ def create_signal(p1, a1, p2, a2, signal, width):
     command = ('line \'%s\' %s (%s %s) %s (%s %s);'
                % (signal,
                   width,
-                  format_mm(p1.x),
-                  format_mm(p1.y),
-                  format_mm(curve * 180.0 / math.pi, True),
-                  format_mm(p2.x),
-                  format_mm(p2.y)))
+                  format_position(p1.x),
+                  format_position(p1.y),
+                  format_angle(curve * 180.0 / math.pi),
+                  format_position(p2.x),
+                  format_position(p2.y)))
     return command
 
 
-def format_mm(mm, leading_plus=False):
+def format_position(mm):
+    """Return a string position in native resolution."""
+    resolution = 3.125e-6
+    mm = math.floor(mm / resolution + 0.5) * resolution
+    text = '%.9f' % mm
+    assert '.' in text
+    text = text.rstrip('0').rstrip('.')
+    return text
+
+
+def format_angle(degrees):
+    """Return a string version of degrees in native resolution."""
+    text = '%+.6f' % degrees
+    assert '.' in text
+    text = text.rstrip('0').rstrip('.')
+    return text
+
+
+def obsolete_format_mm(mm, leading_plus=False):
     """Return a string version of mm."""
-    text = '%.9f' % (mm)
+    if leading_plus:
+        text = '%.6f' % mm
+    else:
+        resolution = 3.125e-6
+        mm = math.floor(mm / resolution + 0.5) * resolution
+        text = '%.9f' % mm
     if leading_plus:
         if not text.startswith('-'):
             text = '+' + text
@@ -718,10 +741,10 @@ def generate_wire_command(signal_name, width, p1, p2):
     command = ('line \'%s\' %s (%s %s) (%s %s);'
                % (signal_name,
                   width,
-                  format_mm(p1.x),
-                  format_mm(p1.y),
-                  format_mm(p2.x),
-                  format_mm(p2.y)))
+                  format_position(p1.x),
+                  format_position(p1.y),
+                  format_position(p2.x),
+                  format_position(p2.y)))
     return command
 
 
@@ -844,20 +867,6 @@ def create_teardrop(joining_point,
     # print('d2=%g, dp2=%g' % (d2, center.distance_to(p2)))
     # print('ea1=%s, ea2=%s' % (end_angle_1 * 180 / math.pi, end_angle_2 * 180 / math.pi))
     commands = []
-    #
-    if False:
-        p = joining_point + d1 * normal
-        commands.append('circle 0.05 (%s %s) (%s %s);'
-                        % (format_mm(p.x),
-                           format_mm(p.y),
-                           format_mm(p.x + 0.3),
-                           format_mm(p.y)))
-        p = joining_point + d2 * normal
-        commands.append('circle 0.05 (%s %s) (%s %s);'
-                        % (format_mm(p.x),
-                           format_mm(p.y),
-                           format_mm(p.x + 0.3),
-                           format_mm(p.y)))
     # end_angle_1 = math.atan2(via_point - d1 * normal)
     # end_angle_2 = math.atan2(via_point - d2 * normal)
     # p3 = via_point
@@ -871,11 +880,11 @@ def create_teardrop(joining_point,
     commands.append('line \'%s\' %s (%s %s) %s (%s %s);'
                     % (signal,
                        width,
-                       format_mm(joining_point.x),
-                       format_mm(joining_point.y),
-                       format_mm(a3, True),
-                       format_mm(via_point.x),
-                       format_mm(via_point.y)))
+                       format_position(joining_point.x),
+                       format_position(joining_point.y),
+                       format_angle(a3),
+                       format_position(via_point.x),
+                       format_position(via_point.y)))
     # add polygon or lines
     if polygon_teardrop:
         a3 = via_point.angle_to(p2) - via_point.angle_to(p1)
@@ -884,46 +893,40 @@ def create_teardrop(joining_point,
         polygon = ('polygon \'%s\' %s (%s %s) %s (%s %s)'
                    % (signal,
                       width,
-                      format_mm(joining_point.x),
-                      format_mm(joining_point.y),
-                      format_mm(a1, True),
-                      format_mm(p1.x),
-                      format_mm(p1.y)))
-        if False:
-            polygon += (' %s (%s %s)'
-                        % (format_mm(a3, True),
-                          format_mm(p2.x),
-                          format_mm(p2.y)))
-        else:
-            polygon += (' %s (%s %s) %s (%s %s)'
-                        % (format_mm(0, True),
-                           format_mm(via_point.x),
-                           format_mm(via_point.y),
-                           format_mm(0, True),
-                           format_mm(p2.x),
-                           format_mm(p2.y)))
+                      format_position(joining_point.x),
+                      format_position(joining_point.y),
+                      format_angle(a1),
+                      format_position(p1.x),
+                      format_position(p1.y)))
+        polygon += (' %s (%s %s) %s (%s %s)'
+                    % (format_angle(0),
+                       format_position(via_point.x),
+                       format_position(via_point.y),
+                       format_angle(0),
+                       format_position(p2.x),
+                       format_position(p2.y)))
         polygon += (' %s (%s %s);'
-                    % (format_mm(-a2, True),
-                       format_mm(joining_point.x),
-                       format_mm(joining_point.y)))
+                    % (format_angle(-a2),
+                       format_position(joining_point.x),
+                       format_position(joining_point.y)))
         commands.append(polygon)
     else:
         commands.append('line \'%s\' %s (%s %s) %s (%s %s);'
                         % (signal,
                            width,
-                           format_mm(joining_point.x),
-                           format_mm(joining_point.y),
-                           format_mm(a1, True),
-                           format_mm(p1.x),
-                           format_mm(p1.y)))
+                           format_position(joining_point.x),
+                           format_position(joining_point.y),
+                           format_angle(a1),
+                           format_position(p1.x),
+                           format_position(p1.y)))
         commands.append('line \'%s\' %s (%s %s) %s (%s %s);'
                         % (signal,
                            width,
-                           format_mm(joining_point.x),
-                           format_mm(joining_point.y),
-                           format_mm(a2, True),
-                           format_mm(p2.x),
-                           format_mm(p2.y)))
+                           format_position(joining_point.x),
+                           format_position(joining_point.y),
+                           format_angle(a2),
+                           format_position(p2.x),
+                           format_position(p2.y)))
     return commands
 
 
@@ -1302,8 +1305,8 @@ def round_signals(filename):
             rounded_distance[key] = target_distance
             # assert key not in adjacent_point
             # adjacent_point[key] = (p1, p3)
-        print(rounded_distance)
-        exit(0)
+        # print(rounded_distance)
+        # exit(0)
         for (layer, point) in junction_points:
             if not rounded_junctions:
                 break
@@ -1442,17 +1445,17 @@ def round_signals(filename):
                 command = ('polygon \'%s\' %s (%s %s)'
                            % (signal_name,
                               corner_width[(layer, p2)],
-                              format_mm(segments[-1][0].x),
-                              format_mm(segments[-1][0].y)))
+                              format_position(segments[-1][0].x),
+                              format_position(segments[-1][0].y)))
                 if signal_name == 'N$15':
                     print(points)
                     print(segments)
                     # exit(1)
                 for i in range(len(segments)):
                     command += (' %s (%s %s)'
-                                % (format_mm(segments[i - 1][1], True),
-                                   format_mm(segments[i][0].x),
-                                   format_mm(segments[i][0].y)))
+                                % (format_angle(segments[i - 1][1]),
+                                   format_position(segments[i][0].x),
+                                   format_position(segments[i][0].y)))
                 command += ';'
                 wires_by_layer[layer].append(command)
                 continue
@@ -1514,6 +1517,7 @@ def get_wires_by_signal(filename):
 
 def snap_wires_to_grid(filename, tolerance_inch=1e-6, spacing_inch=1e-3):
     """Snap wires to the grid if they are close."""
+    print('WARNING: this function was never finished.')
     # number of wire endpoints on-grid/snapped/off-grid
     snapped_wires = [0, 0, 0]
     snapped_vias = [0, 0, 0]
@@ -1531,7 +1535,7 @@ def snap_wires_to_grid(filename, tolerance_inch=1e-6, spacing_inch=1e-3):
     commands.append('display preset_standard;')
     commands.append('set wire_bend 2;')
     commands.append('grid mm;')
-    commands.append('change drill %.9f;' % (0.013 * 25.4))
+    commands.append('change drill %s;' % format_position(0.013 * 25.4))
     # search through the XML tree
     tree = ElementTree.parse(filename)
     root = tree.getroot()
@@ -1574,16 +1578,11 @@ def snap_wires_to_grid(filename, tolerance_inch=1e-6, spacing_inch=1e-3):
                 else:
                     on_grid = False
                 # snap p1 to the native grid
-                x1 = math.floor(p1.x / native_resolution_mm + 0.5) * native_resolution_mm
-                x1 = '%.9f' % x1
-                y1 = math.floor(p1.y / native_resolution_mm + 0.5) * native_resolution_mm
-                y1 = '%.9f' % y1
+                x1 = format_position(p1.x)
+                y1 = format_position(p1.y)
                 # snap p1 to the native grid
-                x2 = math.floor(p2.x / native_resolution_mm + 0.5) * native_resolution_mm
-                x2 = '%.9f' % x2
-                y2 = math.floor(p2.y / native_resolution_mm + 0.5) * native_resolution_mm
-                y2 = '%.9f' % y2
-
+                x2 = format_position(p2.x)
+                y2 = format_position(p2.y)
                 if (float(x1) == float(wire.attrib['x1']) and
                         float(y1) == float(wire.attrib['y1']) and
                         float(x2) == float(wire.attrib['x2']) and

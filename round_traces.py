@@ -32,10 +32,9 @@ rounded_junctions = True
 
 # if True, polygons will be created for multi-wire junctions
 # else, simple traces will be used
-polygon_junctions = True
+polygons_in_junctions = True
 
 # if True, traces will also be output in junctions to avoid wire stub DRC
-# errors
 traces_in_junctions = True
 
 # when creating teardrops, plated diameter must be this much more than
@@ -658,8 +657,6 @@ def delete_via_teardrops(filename):
     commands.append('optimize;')
     commands.append('ratsnest;')
     commands.append('set undo_log on;')
-    # print('\n' * 3)
-    # print('\n'.join(commands))
     with open(script_filename, 'w') as f:
         f.write('\n'.join(commands))
     print('\nScript generated at %s' % script_filename)
@@ -856,7 +853,6 @@ def create_teardrop(joining_point,
         p1 = p1 + radius * Point2D(math.cos(end_angle_1), math.sin(end_angle_1))
     else:
         p1 = p1 - radius * Point2D(math.cos(end_angle_1), math.sin(end_angle_1))
-    # print('d1=%g, dp1=%g' % (d1, center.distance_to(p1)))
     # find second point on radius to join with
     center = joining_point + d2 * normal
     p2 = via_point
@@ -1274,7 +1270,7 @@ def round_signals(filename):
             if len(points) > 2:
                 points.append(points[0])
             # create polygon
-            if len(points) > 2 and polygon_junctions:
+            if len(points) > 2 and polygons_in_junctions:
                 # create list of points along with angle for each
                 segments = []
                 for i in range(len(points) - 1):
@@ -1288,7 +1284,7 @@ def round_signals(filename):
                     angle = math.pi - angle
                     segments.append((p2a, -angle * 180.0 / math.pi))
                 # create polygon command
-                if polygon_junctions:
+                if polygons_in_junctions:
                     command = ('polygon \'%s\' %s (%s %s)'
                                % (signal_name,
                                   corner_width[(layer, p2)],
@@ -1301,7 +1297,7 @@ def round_signals(filename):
                                        format_position(segments[i][0].y)))
                     command += ';'
                     wires_by_layer[layer].append(command)
-                if (not polygon_junctions or
+                if (not polygons_in_junctions or
                         traces_in_junctions):
                     for i in range(len(segments) - 1):
                         command = ('wire \'%s\' %s (%s %s) %s (%s %s);'
@@ -1713,9 +1709,7 @@ def create_teardrop_vias(filename):
         for pad in pads:
             distance, point = get_nearest_point(pad.origin, wire_points)
             if distance > 0 and distance < pad_tolerance_mm:
-                # print('Moving pad by %g' % distance)
                 pad.origin = point
-        # print(pads)
         pths += pads
         # add through hold pads to pths
     print('Found %d total PTHs' % len(pths))
@@ -1793,13 +1787,10 @@ def create_teardrop_vias(filename):
     # [wire1, wire2, wire3, ...]
     # via at wire1.p1 with wire1.p2 == wire2.p1, etc.
     # for chains which have a via at both ends, delete the second half
-    # print(via_points)
-    # print(wire_chains)
     for chain in wire_chains:
         # if there's not a via at the end, keep the entire chain
         if chain[-1].p2 not in via_points:
             continue
-        # print('Found chain with pths at each end: %s' % chain)
         # get total length of chain
         chain_length = sum(wire.get_length() for wire in chain)
         assert chain_length > 0.0
@@ -1827,20 +1818,16 @@ def create_teardrop_vias(filename):
     # hold wire commands to draw by layer
     wires_by_layer = dict()
     for chain in wire_chains:
-        # print('\nProcessing chain at point %s: %s' % (chain[0].p1, chain))
         via_point = chain[0].p1
         wire_width = chain[0].width
         via = via_at_point[chain[0].p1]
         via_diameter = via.outer_diameter
         total_chain_length = sum(x.get_length() for x in chain)
-        # print('- Total length: %s' % total_chain_length)
         # if chain is too short, don't do anything
         if total_chain_length < via_diameter / 2.0 + teardrop_tolerance_mm:
-            # print('- Chain too short: %s' % chain)
             continue
         # can't teardrop pths if the wires are bigger than the via diameter
         if via_diameter <= wire_width + teardrop_tolerance_mm:
-            # print('- Wire at %s too big (%s)' % (via_point, via))
             continue
         r1 = via_diameter / 2.0
         r2 = teardrop_inner_radius_mm + wire_width / 2.0
@@ -1874,7 +1861,6 @@ def create_teardrop_vias(filename):
         if layer not in wires_by_layer:
             wires_by_layer[layer] = []
         wires_by_layer[layer].extend(teardrop_commands)
-        # print(via_point, junction_point)
     # add wires in chains
     for chain in wire_chains:
         if chain[0].layer not in wires_by_layer:
@@ -1899,8 +1885,10 @@ def create_teardrop_vias(filename):
     commands.append('optimize;')
     commands.append('set optimizing on;')
     commands.append('ratsnest;')
-    # commands.append('set undo_log on;')
     commands.append('group (>0 0);')
+    # backup board
+    if backup_board_file:
+        backup_file(filename)
     # create script filename
     script_filename = os.path.join(os.path.dirname(filename),
                                    'create_teardrops.scr')

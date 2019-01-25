@@ -13,6 +13,7 @@ For example:
 import os
 import sys
 import copy
+import filecmp
 import math
 from xml.etree import ElementTree
 from shutil import copyfile
@@ -37,6 +38,18 @@ polygon_junctions = True
 # errors
 traces_in_junctions = True
 
+# when creating teardrops, plated diameter must be this much more than
+# the signal width or a teardrop will be skipped
+teardrop_tolerance_mm = 0.1
+
+# target inner radius of teardrops
+teardrop_inner_radius_mm = 0.050 * 25.4
+
+# if True, will create polygons for teardrops to avoid unplated regions
+create_teardrop_polygons = True
+
+# if True, will also teardrop plated through holes found in packages
+create_teardrops_on_pths = True
 
 ##################
 # END OF OPTIONS #
@@ -930,20 +943,19 @@ def backup_file(filename):
     # max backup files
     maximum_backup_file_count = 99
     # find the next available backup name
-    i = 1
-    while i <= maximum_backup_file_count:
+    for i in range(1, maximum_backup_file_count + 1):
         backup_name = 'backup_%s.%d' % (base_name, i)
         backup_path = os.path.join(dir_name, backup_name)
+        # if file is the same, no need to backup again
         if not os.path.isfile(backup_path):
-            break
-        i += 1
-    if i > maximum_backup_file_count:
-        print('WARNING: Backup file limit exceeded.  No backup created.')
-        return
-    copyfile(filename, backup_path)
-    if not os.path.isfile(backup_path):
-        print('ERROR: Could not create board file backup.')
-    print('- Board file backed up to "%s"' % backup_name)
+            copyfile(filename, backup_path)
+            if not os.path.isfile(backup_path):
+                print('ERROR: Could not create board file backup.')
+            print('- Backup board file "%s" created' % backup_name)
+        if filecmp.cmp(filename, backup_path):
+            print('- Backup board file already exists')
+            return
+    print('WARNING: Backup file limit exceeded.  No backup created.')
 
 
 def round_signals(filename):
@@ -1330,7 +1342,8 @@ def round_signals(filename):
     # commands.append('set undo_log on;')
     commands.append('group (>0 0);')
     # backup board
-    backup_file(filename)
+    if backup_board_file:
+        backup_file(filename)
     # create script
     with open(script_filename, 'w') as f:
         f.write('\n'.join(commands))
@@ -1659,11 +1672,6 @@ def get_nearest_point(point, list_of_points):
 
 def create_teardrop_vias(filename):
     """Create a script to convert pths to teardrop pths in the given file."""
-    # options
-    # if True, will also teardrop plated through holes
-    create_teardrops_on_pths = True
-    # if True, will create teardrop polygon instead of wires
-    create_polygons = True
     # hold commands to redraw all pths/wires
     commands = []
     commands.append('set optimizing off;')
@@ -1784,7 +1792,6 @@ def create_teardrop_vias(filename):
     # change wires within each chain such that points are sorted
     # [wire1, wire2, wire3, ...]
     # via at wire1.p1 with wire1.p2 == wire2.p1, etc.
-    teardrop_inner_diameter_mm = 0.050 * 25.4
     # for chains which have a via at both ends, delete the second half
     # print(via_points)
     # print(wire_chains)
@@ -1817,9 +1824,6 @@ def create_teardrop_vias(filename):
             point, _ = chain[-1].get_distance_along(alpha)
             chain[-1].p2 = point
             chain[-1].curve *= alpha
-    # the via diameter must be at least this much more than the wire width
-    # in order to create a teardrop via
-    tolerance_mm = 0.1
     # hold wire commands to draw by layer
     wires_by_layer = dict()
     for chain in wire_chains:
@@ -1831,15 +1835,15 @@ def create_teardrop_vias(filename):
         total_chain_length = sum(x.get_length() for x in chain)
         # print('- Total length: %s' % total_chain_length)
         # if chain is too short, don't do anything
-        if total_chain_length < via_diameter / 2.0 + tolerance_mm:
+        if total_chain_length < via_diameter / 2.0 + teardrop_tolerance_mm:
             # print('- Chain too short: %s' % chain)
             continue
         # can't teardrop pths if the wires are bigger than the via diameter
-        if via_diameter <= wire_width + tolerance_mm:
+        if via_diameter <= wire_width + teardrop_tolerance_mm:
             # print('- Wire at %s too big (%s)' % (via_point, via))
             continue
         r1 = via_diameter / 2.0
-        r2 = teardrop_inner_diameter_mm + wire_width / 2.0
+        r2 = teardrop_inner_radius_mm + wire_width / 2.0
         d = math.sqrt((r1 + r2) ** 2 - (r2 + wire_width / 2.0) ** 2)
         result = find_point_on_chain(chain, via_point, d)
         # if chain is not long enough, ignore it
@@ -1855,7 +1859,7 @@ def create_teardrop_vias(filename):
                                             (via_diameter - wire_width) / 2.0,
                                             via.signal,
                                             chain[0].width,
-                                            polygon_teardrop=create_polygons)
+                                            create_teardrop_polygons)
         # delete portion of chain between via and junction point
         layer = chain[0].layer
         chain[:] = chain[wire_index:]
@@ -1906,6 +1910,7 @@ def create_teardrop_vias(filename):
 
 
 round_signals(board_file)
+
 
 # execute as a script
 if __name__ == "__main__":

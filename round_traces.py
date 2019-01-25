@@ -1,21 +1,52 @@
 """
 This script modifies an eagle board file by rounding corners of traces.
 
+Usage:
+> python round_traces.py [options] [board_filename]
 
-
-Process for creating rounded traces:
-
-
-
+For example:
+> python round_traces.py --teardrop /path/to/board.brd
+> python round_traces.py --round /path/to/board.brd
 
 """
 
 import os
+import sys
 import copy
 import math
 from xml.etree import ElementTree
+from shutil import copyfile
 
 from point2d import Point2D
+
+####################
+# START OF OPTIONS #
+####################
+
+# if True, board file will be backed up when creating a script
+backup_board_file = True
+
+# if True, will also round corners of 3+ wire junctions
+rounded_junctions = True
+
+# if True, polygons will be created for multi-wire junctions
+# else, simple traces will be used
+polygon_junctions = True
+
+# if True, traces will also be output in junctions to avoid wire stub DRC
+# errors
+traces_in_junctions = True
+
+
+##################
+# END OF OPTIONS #
+##################
+
+# native Eagle resolution
+native_resolution_mm = 3.125e-6
+
+# mm per inch
+mm_per_inch = 25.4
 
 # hold path to Eagle projects
 project_directory = r'C:\Users\tdkostk\Documents\eagle\projects'
@@ -31,8 +62,6 @@ project_directory = r'C:\Users\tdkostk\Documents\eagle\projects'
 board_file = r'\round_traces\round_traces_test_2.brd'
 
 board_file = project_directory + board_file
-
-mm_per_inch = 25.4
 
 
 class SMD:
@@ -673,8 +702,7 @@ def create_signal(p1, a1, p2, a2, signal, width):
 
 def format_position(mm):
     """Return a string position in native resolution."""
-    resolution = 3.125e-6
-    mm = math.floor(mm / resolution + 0.5) * resolution
+    mm = math.floor(mm / native_resolution_mm + 0.5) * native_resolution_mm
     text = '%.9f' % mm
     assert '.' in text
     text = text.rstrip('0').rstrip('.')
@@ -686,22 +714,6 @@ def format_angle(degrees):
     text = '%+.6f' % degrees
     assert '.' in text
     text = text.rstrip('0').rstrip('.')
-    return text
-
-
-def obsolete_format_mm(mm, leading_plus=False):
-    """Return a string version of mm."""
-    if leading_plus:
-        text = '%.6f' % mm
-    else:
-        resolution = 3.125e-6
-        mm = math.floor(mm / resolution + 0.5) * resolution
-        text = '%.9f' % mm
-    if leading_plus:
-        if not text.startswith('-'):
-            text = '+' + text
-    if '.' in text:
-        text = text.rstrip('0').rstrip('.')
     return text
 
 
@@ -901,10 +913,37 @@ def create_teardrop(joining_point,
 
 
 def snapped_point(point):
-    """Return the point snapped to the nearest native resoltion."""
-    resolution = 3.125e-6
-    return Point2D(math.floor(point.x / resolution + 0.5) * resolution,
-                   math.floor(point.y / resolution + 0.5) * resolution)
+    """Return the point snapped to the nearest native resolution."""
+    return Point2D(format_position(point.x), format_position(point.y))
+
+
+def backup_file(filename):
+    """Create a backup of a board file."""
+    # ensure file exists
+    assert os.path.isfile(filename)
+    # get base board directory
+    dir_name = os.path.dirname(filename)
+    # get base board filename
+    base_name = os.path.basename(filename)
+    if not base_name.lower().endswith('.brd'):
+        print('WARNING: Board file doesn\'t have expected BRD extension.')
+    # max backup files
+    maximum_backup_file_count = 99
+    # find the next available backup name
+    i = 1
+    while i <= maximum_backup_file_count:
+        backup_name = 'backup_%s.%d' % (base_name, i)
+        backup_path = os.path.join(dir_name, backup_name)
+        if not os.path.isfile(backup_path):
+            break
+        i += 1
+    if i > maximum_backup_file_count:
+        print('WARNING: Backup file limit exceeded.  No backup created.')
+        return
+    copyfile(filename, backup_path)
+    if not os.path.isfile(backup_path):
+        print('ERROR: Could not create board file backup.')
+    print('- Board file backed up to "%s"' % backup_name)
 
 
 def round_signals(filename):
@@ -925,19 +964,11 @@ def round_signals(filename):
     * Resolve corners
 
     """
+    base_board_filename = os.path.basename(filename)
+    print('\n\nRounding traces in board file "%s".' % base_board_filename)
     # create script filename
     script_filename = os.path.join(os.path.dirname(filename),
                                    'round_signals.scr')
-    # if True, will also round corners of 3+ wire junctions
-    rounded_junctions = True
-    # if True, polygons will be created for multi-wire junctions
-    # else, simple traces will be used
-    create_polygons_in_junctions = True
-    # if True, traces will also be output in junctions to avoid wire stub DRC
-    # errors
-    create_traces_in_junctions = True
-    # shortest possible nonzero wire length (native Eagle resolution)
-    native_resolution_mm = 3.125e-6
     # if a wire is shorter than this, ignore it
     length_tolerance_mils = 1e-9 / 0.0254
     # parse the XML file
@@ -995,12 +1026,8 @@ def round_signals(filename):
     # hold wire commands to draw by layer
     wires_by_layer = dict()
     curved_wire_count = 0
-    print('Finding all signal wires.')
     for signal in root.iter('signal'):
         signal_name = signal.attrib['name']
-        print('\nIn signal %s:' % signal_name)
-        # if signal_name not in wires_by_signal:
-        #    wires_by_signal[signal_name] = []
         # store via points
         via_points = set()
         # store all via tag attributes
@@ -1078,11 +1105,6 @@ def round_signals(filename):
         # for each point, hold the distance to the next point we want to fillet
         # rounded_distance[(layer, point)] = X
         rounded_distance = dict()
-        # hold segments which will be rounded
-        # (layer, point1, point2)
-        # rounded_segment = set()
-        # hold adjacent points
-        # print(locked_points)
         # look through all points with exactly 2 wires and try to simplify
         for (layer, point), wire_count in wires_at_point.items():
             # if this point is fixed, don't modify this intersection
@@ -1114,23 +1136,11 @@ def round_signals(filename):
             if wire_one.attrib['width'] != wire_two.attrib['width']:
                 continue
             corner_width[(layer, point)] = wire_one.attrib['width']
-            # print('Trying to simplify wires at %s on layer %s'
-            #      % (point, layer))
-            # print(wires)
             wire_width = float(wire_one.attrib['width'])
-            # target_radius = wire_width
-            # target_radius *= target_inner_radius_ratio + 0.5
-            # target_radius = wire_width + target_inner_radius_mils * 0.0254
             p2 = point
             p1 = get_other_point(wire_one, p2)
             p3 = get_other_point(wire_two, p2)
             assert p3 != p1
-            # get the maximum distance based on the path length restriction
-            # l1 = get_wire_length(wire_one)
-            # l2 = get_wire_length(wire_two)
-            # max_distance = l1 if l1 < l2 else l2
-            # max_distance -= min_remaining_segment_mils * 0.0254
-            # max_distance /= 2.0
             # get unit direction vectors
             a1 = (p2 - p1).normalize()
             a2 = (p3 - p2).normalize()
@@ -1183,8 +1193,6 @@ def round_signals(filename):
                 inner_angle = these_wires[i + 1][0] - these_wires[i][0]
                 theta = get_angle_deviation(p1, point, p3)
                 if inner_angle * 180.0 / math.pi > 181.0:
-                    # print(inner_angle * 180.0 / math.pi, theta)
-                    # exit(1)
                     continue
                 # skip angles close to 180
                 if theta * 180.0 / math.pi > 170.0:
@@ -1198,9 +1206,6 @@ def round_signals(filename):
             key = (layer, point)
             assert key not in rounded_distance
             rounded_distance[key] = target_distance
-            # for x in these_wires:
-            #    print(x)
-            # exit(1)
         # look through each segment and find out length used by transitions
         # committed_length[(layer, p1, p2)] = X
         committed_length = dict()
@@ -1228,9 +1233,6 @@ def round_signals(filename):
             key = (layer, point)
             if key in rounded_distance:
                 rounded_distance[key] *= scale
-        # if scaling_factor:
-        #    print(scaling_factor)
-        #    assert False
         # create remaining segment
         for wire in wires:
             p1, p2 = get_wire_endpoints(wire)
@@ -1248,7 +1250,6 @@ def round_signals(filename):
                 wires_by_layer[layer_name] = []
             wire_length = (pa - pb).norm()
             if wire_length < length_tolerance_mils * 0.0254:
-                # print('skipping wire of length %g' % (wire_length))
                 continue
             command = generate_wire_command(signal_name,
                                             wire.attrib['width'],
@@ -1261,7 +1262,7 @@ def round_signals(filename):
             if len(points) > 2:
                 points.append(points[0])
             # create polygon
-            if len(points) > 2 and create_polygons_in_junctions:
+            if len(points) > 2 and polygon_junctions:
                 # create list of points along with angle for each
                 segments = []
                 for i in range(len(points) - 1):
@@ -1275,7 +1276,7 @@ def round_signals(filename):
                     angle = math.pi - angle
                     segments.append((p2a, -angle * 180.0 / math.pi))
                 # create polygon command
-                if create_polygons_in_junctions:
+                if polygon_junctions:
                     command = ('polygon \'%s\' %s (%s %s)'
                                % (signal_name,
                                   corner_width[(layer, p2)],
@@ -1288,8 +1289,8 @@ def round_signals(filename):
                                        format_position(segments[i][0].y)))
                     command += ';'
                     wires_by_layer[layer].append(command)
-                if (create_polygons_in_junctions or
-                        create_traces_in_junctions):
+                if (not polygon_junctions or
+                        traces_in_junctions):
                     for i in range(len(segments) - 1):
                         command = ('wire \'%s\' %s (%s %s) %s (%s %s);'
                                    % (signal_name,
@@ -1314,19 +1315,11 @@ def round_signals(filename):
                     wires_by_layer[layer] = []
                 wires_by_layer[layer].append(new_wire_command)
         # go through each segment and create transitions and lines
-        print('- %d fixed points' % (len(locked_points)))
-        print('- %d corners' % (len(corner_points)))
-        print('- %d junctions' % (len(junction_points)))
-        # print('Needed to scale back %d points' % (len(scaling_factor)))
-        # print(rounded_distance)
-        # print(adjacent_point)
     # draw all wires
     commands.append('change thermals off;')
     for layer in sorted(wires_by_layer.keys()):
         commands.append('layer %s;' % layer)
         commands.extend(sorted(wires_by_layer[layer], key=wire_command_sort))
-        # for x in sorted(wires_by_layer[layer], key=wire_command_sort):
-        #    print(wire_command_sort(x))
     # set view on top layer
     commands.append('change layer 1;')
     # ratsnest to get rid of airwires
@@ -1336,9 +1329,13 @@ def round_signals(filename):
     commands.append('ratsnest;')
     # commands.append('set undo_log on;')
     commands.append('group (>0 0);')
+    # backup board
+    backup_file(filename)
+    # create script
     with open(script_filename, 'w') as f:
         f.write('\n'.join(commands))
-    print('\nScript generated at %s' % script_filename)
+    print('Script generated in board file directory.')
+    print('To run, open board and run "script round_traces.scr".')
 
 
 def snap_wires_to_grid(filename, tolerance_inch=1e-6, spacing_inch=1e-3):
@@ -1704,7 +1701,7 @@ def create_teardrop_vias(filename):
     if create_teardrops_on_pths:
         pads = read_pad_pths(filename)
         print('Found %d pads' % len(pads))
-        pad_tolerance_mm = 10 * 3.125e-6
+        pad_tolerance_mm = 10 * native_resolution_mm
         for pad in pads:
             distance, point = get_nearest_point(pad.origin, wire_points)
             if distance > 0 and distance < pad_tolerance_mm:
@@ -1820,10 +1817,6 @@ def create_teardrop_vias(filename):
             point, _ = chain[-1].get_distance_along(alpha)
             chain[-1].p2 = point
             chain[-1].curve *= alpha
-    # print('- Wire chain lengths: %s' % [sum(x.get_length() for x in chain)
-    #                                     for chain in wire_chains])
-    # for x in wire_chains:
-    #     print(x)
     # the via diameter must be at least this much more than the wire width
     # in order to create a teardrop via
     tolerance_mm = 0.1
@@ -1912,10 +1905,39 @@ def create_teardrop_vias(filename):
     print('\nScript generated at %s' % script_filename)
 
 
-# snap_wires_to_grid(board_file)
-
 round_signals(board_file)
 
-create_teardrop_vias(board_file)
+# execute as a script
+if __name__ == "__main__":
+    options = sys.argv
+    # this_script_filename = options[0]
+    del options[0]
+    # if no arguments, output docscript
+    if not options:
+        print(__doc__)
+        exit(0)
+    # save board filename
+    board_filename = options[-1]
+    if not os.path.isfile(board_filename):
+        print('ERROR: file \"%s\" not found' % board_filename)
+    del options[-1]
+    # if no options given, output error
+    if not options:
+        print('ERROR: No options selected.  See usage information.')
+        print(__doc__)
+        exit(1)
+    # get options
+    for option in options:
+        if option == '--round':
+            round_signals(board_filename)
+        elif option == '--teardrop':
+            create_teardrop_vias(board_filename)
+        else:
+            print('ERROR: option \"%s\" not recognized' % option)
+
+
+# snap_wires_to_grid(board_file)
+
+# create_teardrop_vias(board_file)
 
 # delete_via_teardrops(board_file)

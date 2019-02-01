@@ -4,7 +4,7 @@ import math
 class Point2D:
     """Holds a 2D Point class."""
 
-    def __init__(self, x, y):
+    def __init__(self, x=0.0, y=0.0):
         self.x = x
         self.y = y
 

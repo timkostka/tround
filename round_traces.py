@@ -10,6 +10,14 @@ For example:
 
 """
 
+# When a file is loaded, first the objects are loaded into memory as follows:
+# class Board:
+#   board.vias = list of Vias()
+#   board.wires = list of Wire()
+#   board.dru = DesignRules()
+#   board.libraries = dict of library -> LibraryPackage()
+#   board.elements = list of Element()
+
 import os
 import sys
 import copy
@@ -43,6 +51,7 @@ teardrop_tolerance_mm = 0.1
 
 # target inner radius of teardrops
 teardrop_inner_radius_mm = 0.050 * 25.4
+# teardrop_inner_radius_mm = 0.25 * 25.4
 
 # if True, will create polygons for teardrops to avoid unplated regions
 create_teardrop_polygons = True
@@ -50,11 +59,23 @@ create_teardrop_polygons = True
 # if True, will also teardrop plated through holes found in packages
 create_teardrops_on_pths = True
 
+# when rounding signals, maximum deviation from the original copper
+max_trace_deviation_mils = 5
+
+# when rounding signals, targer inner radius
+target_inner_radius_mils = 100
+
+# if True, will output more info than normal
+verbose = True
+
+# if True, will output way more info than normal
+super_verbose = True
+
 ##################
 # END OF OPTIONS #
 ##################
 
-# native Eagle resolution
+# native Eagle positional resolution
 native_resolution_mm = 3.125e-6
 
 # mm per inch
@@ -64,14 +85,17 @@ mm_per_inch = 25.4
 project_directory = r'C:\Users\tdkostk\Documents\eagle\projects'
 
 # project and filename to modify
-# board_file = r'\micro_ohmmeter\micro_ohmmeter_rev5.brd'
 # board_file = r'\round_traces\round_traces_test.brd'
 # board_file = r'\teardrop_vias\teardrop_test.brd'
 # board_file = r'\kct-tester\sandia-cable-tester-rev5-rounded.brd'
 # board_file = r'\kct-tester\sandia-cable-tester-rev5.brd'
 # board_file = r'\sandia_cable_tester\sandia-cable-tester-rev5.brd'
 # board_file = r'\sandia_cable_tester\sandia-cable-tester-rev5-round.brd'
-board_file = r'\round_traces\round_traces_test_2.brd'
+# board_file = r'\round_traces\round_traces_test_2.brd'
+# board_file = r'\sct-adapters\sct-terminal-block-6.brd'
+# board_file = r'\sct-adapters\sct-terminal-block-6-round.brd'
+# board_file = r'\sct-adapters\sct-bnc-male.brd'
+board_file = r'\micro_ohmmeter\micro_ohmmeter_rev5.brd'
 
 board_file = project_directory + board_file
 
@@ -136,6 +160,15 @@ class PTH:
         self.inner_diameter = inner_diameter
         # connected signal
         self.signal = signal
+
+    @staticmethod
+    def from_via(via):
+        """Return a PTH created from the given Via."""
+        return PTH(via.origin,
+                   via.drill,
+                   via.outer_diameter,
+                   via.inner_diameter,
+                   via.signal)
 
     def __repr__(self):
         """Return a string representation."""
@@ -241,18 +274,149 @@ class LibraryPackage:
         return '%s(%s)' % (self.__class__.__name__, ', '.join(sorted(args)))
 
 
+class Polygon:
+    """A Polygon holds information about a single polygon within a BRD file."""
+
+    def __init__(self):
+        self.signal = None
+        self.layer = '1'
+        self.width = 0.0
+        self.rank = '1'
+        self.pour = 'solid'
+        self.spacing = 0.0
+        self.orphans = 'off'
+        self.isolate = 0.0
+        self.thermals = 'on'
+        self.locked = 'no'
+        # self.verticies = [(Point2D(), curve), ...]
+        self.vertices = []
+
+    @staticmethod
+    def from_xml(polygon_xml):
+        """Create a Polygon given an XML tag."""
+        assert polygon_xml.tag == 'polygon'
+        polygon = Polygon()
+        if 'rank' in polygon_xml.attrib:
+            polygon.rank = polygon_xml.attrib['rank']
+        polygon.width = polygon_xml.attrib['width']
+        polygon.layer = polygon_xml.attrib['layer']
+        for vertex in polygon_xml.iter('vertex'):
+            curve = 0.0
+            if 'curve' in vertex.attrib:
+                curve = float(vertex.attrib['curve'])
+            polygon.vertices.append((Point2D(float(vertex.attrib['x']),
+                                             float(vertex.attrib['y'])),
+                                     curve))
+        print(polygon)
+        return polygon
+
+    def get_commands(self):
+        """Return the commands needed to generate this polygon."""
+        commands = []
+        # set rank
+        commands.append('change layer %s;' % self.layer)
+        commands.append('change pour %s;' % self.pour)
+        commands.append('change rank %s;' % self.rank)
+        commands.append('change thermals %s;' % self.thermals)
+        if self.pour != 'solid':
+            commands.append('change spacing %s;'
+                            % format_position(self.spacing))
+        commands.append('change isolate %s;' % format_position(self.spacing))
+        commands.append('change orphans %s;' % self.orphans)
+        command = 'polygon'
+        if self.signal:
+            command += ' \'%s\'' % self.signal
+        command += ' %s' % self.width
+        for point, curve in self.vertices:
+            command += (' (%s %s) %s' %
+                        (format_position(point.x),
+                         format_position(point.y),
+                         format_angle(curve)))
+        command += (' (%s %s);' %
+                    (format_position(self.vertices[0][0].x),
+                     format_position(self.vertices[0][0].y)))
+        commands.append(command)
+        return commands
+
+    def __repr__(self):
+        """Return a string representation."""
+        args = []
+        for attr in dir(self):
+            # skip hidden values/functions
+            if attr.startswith('_'):
+                continue
+            # skip all functions
+            if callable(getattr(self, attr)):
+                continue
+            args.append('%s=%s' % (attr, getattr(self, attr)))
+        return '%s(%s)' % (self.__class__.__name__, ', '.join(sorted(args)))
+
+
 class Wire:
 
-    def __init__(self, wire, signal_name=None):
-        self.p1 = Point2D(float(wire.attrib['x1']), float(wire.attrib['y1']))
-        self.p2 = Point2D(float(wire.attrib['x2']), float(wire.attrib['y2']))
-        self.signal = signal_name
-        self.width = float(wire.attrib['width'])
-        self.layer = wire.attrib['layer']
-        if 'curve' in wire.attrib:
-            self.curve = float(wire.attrib['curve'])
+    def __init__(self,
+                 p1=Point2D(),
+                 p2=Point2D(),
+                 signal=None,
+                 width=0.0,
+                 layer='1',
+                 curve=0.0):
+        self.p1 = p1
+        self.p2 = p2
+        self.signal = signal
+        self.width = width
+        self.layer = layer
+        self.curve = curve
+
+    @staticmethod
+    def from_rounded_corner(p1, p2, p3, width, signal, layer):
+        """Create and return a rounded wire between the given points."""
+        # The distance from p1 to p2 should be the same as from p2 to p3
+        # get directions
+        a1 = (p2 - p1).normalize()
+        a2 = (p3 - p2).normalize()
+        cosine = min(1.0, max(-1.0, a1.dot(a2)))
+        theta = math.acos(cosine)
+        ccw_test = a1.angle() + theta - a2.angle()
+        ccw_test = ((ccw_test + math.pi) % (2.0 * math.pi)) - math.pi
+        cw_test = a1.angle() - theta - a2.angle()
+        cw_test = ((cw_test + math.pi) % (2.0 * math.pi)) - math.pi
+        ### print(p1, p2, p3)
+        ### print(cosine, theta, a1.angle(), a2.angle(), cw_test, ccw_test)
+        assert abs(cw_test) < 1e-6 or abs(ccw_test) < 1e-6
+        if abs(cw_test) < abs(ccw_test):
+            theta = -theta
+        return Wire(p1, p3, signal, width, layer, theta)
+
+    @staticmethod
+    def from_xml(wire_xml, signal_name=None):
+        """Create and return a wire from the XML tag."""
+        assert wire_xml.tag == 'wire'
+        wire = Wire()
+        wire.p1 = Point2D(float(wire_xml.attrib['x1']),
+                          float(wire_xml.attrib['y1']))
+        wire.p2 = Point2D(float(wire_xml.attrib['x2']),
+                          float(wire_xml.attrib['y2']))
+        wire.signal = signal_name
+        wire.width = float(wire_xml.attrib['width'])
+        wire.layer = wire_xml.attrib['layer']
+        if 'curve' in wire_xml.attrib:
+            wire.curve = float(wire_xml.attrib['curve']) * math.pi / 180.0
         else:
-            self.curve = 0.0
+            wire.curve = 0.0
+        return wire
+
+    @staticmethod
+    def from_points(p1, p2, width, signal, layer):
+        """Create and return a straight wire between the given points."""
+        wire = Wire()
+        wire.p1 = p1
+        wire.p2 = p2
+        wire.signal = signal
+        wire.width = width
+        wire.layer = layer
+        wire.curve = 0.0
+        return wire
 
     def get_other_point(self, point):
         """Given one end point, return the other one."""
@@ -321,12 +485,16 @@ class Wire:
 
     def get_command(self):
         """Return the command to recreate the wire."""
+        if self.curve == 0.0:
+            angle = ''
+        else:
+            angle = ' %s' % format_angle(self.curve * 180.0 / math.pi)
         command = ('wire \'%s\' %s (%s %s)%s (%s %s);'
                    % (self.signal if self.signal else '',
                       format_position(self.width),
                       format_position(self.p1.x),
                       format_position(self.p1.y),
-                      '' if self.curve == 0.0 else format_angle(self.curve),
+                      angle,
                       format_position(self.p2.x),
                       format_position(self.p2.y)))
         return command
@@ -445,6 +613,102 @@ class Element:
                    self.origin,
                    self.rotation,
                    self.mirrored))
+
+
+def simplify_commands(commands):
+    """Remove unnecessary commands from the list of commands."""
+    parameters = dict()
+    # hold unnecessary command lines
+    duplicates = []
+    for i, command in enumerate(commands):
+        command = commands[i].lower()
+        if not command.startswith('change '):
+            continue
+        words = command.split(maxsplit=2)
+        if len(words) < 3:
+            continue
+        if words[1] in parameters and parameters[words[1]] == words[2]:
+            duplicates.append(i)
+        else:
+            parameters[words[1]] = words[2]
+    # delete those lines
+    for i in reversed(duplicates):
+        del commands[i]
+
+
+class Board:
+    """A Board holds information within a single Eagle BRD file."""
+
+    def __init__(self, filename):
+        """Initialize with a filename."""
+        self.filename = filename
+        self.dru = read_design_rules(filename)
+        self.libraries = read_libraries(filename)
+        self.elements = read_elements(filename)
+        self.vias = read_vias(filename, self.dru)
+        self.wires = read_wires(filename)
+        self.contact_refs = read_contact_refs(filename)
+        # Polygons are handled differently than wires since they cannot be
+        # easily deleted using command-line options.  Because of this, we store
+        # the polygons originally in the board file as well as new polygons to
+        # create.
+        # polygons in the board file
+        self.polygons = read_polygons(filename)
+        # new polygons to create
+        self.new_polygons = []
+
+    def backup_file(self):
+        """Create a board backup file."""
+        backup_file(self.filename)
+
+    def generate_script(self, wires=True, polygons=True, vias=False):
+        """Generate a script which generates copper in this Board."""
+        # hold script commands to run
+        commands = []
+        commands.append('set optimizing off;')
+        commands.append('set wire_bend 2;')
+        commands.append('grid mm;')
+        ### commands.append('change drill %s;' % format_position(0.013 * 25.4))
+        if wires:
+            commands.append('display none;')
+            commands.append('display 1 to 16;')
+            commands.append('group all;')
+            commands.append('ripup (>0 0);')
+        commands.append('display none;')
+        commands.append('display preset_standard;')
+        copper_by_layer = dict()
+        if wires:
+            for wire in self.wires:
+                if wire.layer not in copper_by_layer:
+                    copper_by_layer[wire.layer] = []
+                copper_by_layer[wire.layer].append(wire.get_command())
+        # add copper commands
+        for layer in sorted(copper_by_layer.keys()):
+            commands.append('change layer %s;' % layer)
+            commands.extend(copper_by_layer[layer])
+        for polygon in self.new_polygons:
+            commands.append('change layer %s;' % polygon.layer)
+            commands.extend(polygon.get_commands())
+        assert not vias
+        # create script filename
+        script_filename = os.path.join(os.path.dirname(self.filename),
+                                       'round_traces.scr')
+        if verbose:
+            print('- Script generated in board file directory.')
+            print('- To run, open board and run "script %s".' % script_filename)
+        commands.append('display preset_standard;')
+        commands.append('change layer 1;')
+        commands.append('grid last;')
+        commands.append('optimize;')
+        commands.append('set optimizing on;')
+        commands.append('ratsnest;')
+        # remove unnecessary change commands
+        simplify_commands(commands)
+        # write script
+        with open(script_filename, 'w') as f:
+            f.write('\n'.join(commands))
+        return script_filename
+
 
 
 def get_package_points(package_xml):
@@ -688,6 +952,7 @@ def get_other_point(wire, start_point):
 
 def create_signal(p1, a1, p2, a2, signal, width):
     """Return the command to make an arced wire with the given angles."""
+    assert False
     a1.normalize()
     a2.normalize()
     theta = math.acos(a1.dot(a2) / a1.norm() / a2.norm())
@@ -769,26 +1034,45 @@ def wire_command_sort(command):
 
 def get_angle_deviation(p1, p2, p3):
     """Return the change in angle between p1-p2 and p2-p3."""
-    cosine = (p2 - p1).dot(p3 - p2)
-    cosine /= (p2 - p1).norm() * (p3 - p2).norm()
+    # get unit direction vectors
+    a1 = (p2 - p1).normalize()
+    a2 = (p3 - p2).normalize()
+    cosine = a1.dot(a2)
+    # due to roundoff, cosine may be slightly out of bounds
     if cosine > 1.0:
         cosine = 1.0
+    elif cosine < -1.0:
+        cosine = -1.0
     return math.acos(cosine)
 
 
-def get_transition_distance(width_mm, angle):
+def get_transition_distance(width_mm, p1, p2, p3):
     """Return the target distance to start the transition."""
-    # target inner radius of trace as a ratio of trace width
-    target_inner_radius_mils = 30
-    # maximum distance the trace can move away from the original path (in mils)
-    max_trace_deviation_mils = 5
+    # if two of the points are the same, don't round the corner
+    if p1 == p3 or p1 == p2 or p2 == p3:
+        if verbose:
+            print('Info: duplicate points in get_transition_distance()')
+        return 0.0
+    # get opening angle
+    theta = math.pi - get_angle_deviation(p1, p2, p3)
+    assert 0 <= theta <= math.pi
+    # for angles close to 180, don't round the corner
+    #if theta * 180.0 / math.pi > 170.0:
+    #    return 0.0
+    # skip very small angles
+    if theta * 180.0 / math.pi < 5.0:
+        print(theta)
+        if verbose:
+            print('Info: small angle encountered in get_transition_distance()')
+        return 0.0
     # target radius based on target inner radius
     radius_1 = target_inner_radius_mils * 0.0254 + width_mm / 2.0
     # target radius based on deviation
     radius_2 = -0.25 * (-2.0 * max_trace_deviation_mils * 0.0254 +
-                        width_mm * (math.cos(angle / 2.0) - 1))
-    radius_2 /= math.sin(angle / 4.0) ** 2
-    length = min(radius_1, radius_2) * math.tan(angle / 2.0)
+                        width_mm * (math.cos(theta / 2.0) - 1))
+    radius_2 /= math.sin(theta / 4.0) ** 2
+    length = min(radius_1, radius_2) * math.tan(theta / 2.0)
+    assert length > 0.0
     return length
 
 
@@ -923,7 +1207,8 @@ def create_teardrop(joining_point,
 
 def snapped_point(point):
     """Return the point snapped to the nearest native resolution."""
-    return Point2D(format_position(point.x), format_position(point.y))
+    return Point2D(float(format_position(point.x)),
+                   float(format_position(point.y)))
 
 
 def backup_file(filename):
@@ -947,14 +1232,15 @@ def backup_file(filename):
             copyfile(filename, backup_path)
             if not os.path.isfile(backup_path):
                 print('ERROR: Could not create board file backup.')
-            print('- Backup board file "%s" created' % backup_name)
+            print('- Backup board file "%s" created.' % backup_name)
+            return
         if filecmp.cmp(filename, backup_path):
-            print('- Backup board file already exists')
+            print('- Backup board file already exists.')
             return
     print('WARNING: Backup file limit exceeded.  No backup created.')
 
 
-def round_signals(filename):
+def obsolete_round_signals(filename):
     """
     Create rounded signal lines instead of sharp corners.
 
@@ -1031,6 +1317,10 @@ def round_signals(filename):
                 point.x = -point.x
             # snap to grid
             base_locked_points.add(origin + point)
+    # hold number of corners rounded
+    rounded_corner_count = 0
+    # hold number of junctions rounded
+    rounded_junction_count = 0
     # hold wire commands to draw by layer
     wires_by_layer = dict()
     curved_wire_count = 0
@@ -1271,6 +1561,7 @@ def round_signals(filename):
                 points.append(points[0])
             # create polygon
             if len(points) > 2 and polygons_in_junctions:
+                rounded_junction_count += 1
                 # create list of points along with angle for each
                 segments = []
                 for i in range(len(points) - 1):
@@ -1310,6 +1601,7 @@ def round_signals(filename):
                                       format_position(segments[i + 1][0].y)))
                         wires_by_layer[layer].append(command)
                 continue
+            rounded_corner_count += 1
             for i in range(len(points) - 1):
                 p1, p3 = points[i], points[i + 1]
                 a1 = (p2 - p1).normalize()
@@ -1323,6 +1615,8 @@ def round_signals(filename):
                     wires_by_layer[layer] = []
                 wires_by_layer[layer].append(new_wire_command)
         # go through each segment and create transitions and lines
+    print('- Rounded %d corners and %d junctions.'
+          % (rounded_corner_count, rounded_junction_count))
     # draw all wires
     commands.append('change thermals off;')
     for layer in sorted(wires_by_layer.keys()):
@@ -1343,8 +1637,454 @@ def round_signals(filename):
     # create script
     with open(script_filename, 'w') as f:
         f.write('\n'.join(commands))
-    print('Script generated in board file directory.')
-    print('To run, open board and run "script round_traces.scr".')
+    print('- Script generated in board file directory.')
+    print('- To run, open board and run "script %s".' % script_filename)
+
+
+def round_signals(board):
+    """
+    Round signals within the given Board object.
+
+    """
+    if verbose:
+        print('\nRounding signals in board')
+    # hold positions of PTHs which should not be moved for each signal
+    # locked_pths[signal_name] = {Point2D(), ...}
+    locked_pths = {signal: {x.origin for x in pths}
+                   for signal, pths in read_pths_by_signal(board).items()}
+    if verbose:
+        print('- Found %d PTHs for %d signals'
+              % (sum(len(x) for x in locked_pths.values()),
+                 len(locked_pths)))
+    # print(locked_pths)
+    # hold points which should not be moved for each signal
+    # locked_points[signal_name] = {(layer_name, Point2D), ...}
+    locked_points = read_smds_by_signal(board)
+    if verbose:
+        print('- Found %d SMD pads for %d signals'
+              % (sum(len(x) for x in locked_points.values()),
+                 len(locked_points)))
+    # print(locked_points)
+    # hold number of corners rounded
+    rounded_corner_count = 0
+    # hold number of junctions rounded
+    rounded_junction_count = 0
+    # number of wires which were already curved
+    curved_wire_count = 0
+    # hold list of all signals to pass through
+    signal_names = set(wire.signal for wire in board.wires)
+    # sort wires by signal
+    wires_by_signal = dict()
+    for signal in signal_names:
+        wires_by_signal[signal] = []
+    for wire in board.wires:
+        wires_by_signal[wire.signal].append(wire)
+    # hold list of wires to draw to replace all wires corrently on board
+    new_wires = []
+    # hold list of new polygons
+    new_polygons = []
+    # loop through each signal
+    for signal_name in sorted(signal_names):
+        if super_verbose:
+            print('- Rounding wires on signal "%s"' % signal_name)
+        # alias locked pths and points
+        these_locked_points = locked_points.get(signal_name, {})
+        these_locked_pths = locked_pths.get(signal_name, {})
+        # alias wires for this signal
+        these_wires = wires_by_signal[signal_name]
+        if super_verbose:
+            print('  - Found %d wires' % len(these_wires))
+        # store wires at each (layer, point)
+        wires_at_point = dict()
+        for wire in these_wires:
+            for point in [wire.p1, wire.p2]:
+                this_point = (wire.layer, point)
+                if this_point not in wires_at_point:
+                    wires_at_point[this_point] = []
+                wires_at_point[this_point].append(wire)
+        # signal_name = signal.attrib['name']
+        # store via points
+        ### via_points = set()
+        # store all via tag attributes
+        # via[point] = {'x': 1.0, 'y': 1.0, 'drill': x
+        ### vias = dict()
+        # hold fixed points (vias, end points)
+        ### locked_points = set(base_locked_points)
+        # for each wire point, hold the adjacent points
+        # adjacent_points[(layer, p1)] = [p2, p3, ...]
+        adjacent_points = dict()
+        for wire in these_wires:
+            if wire.p1 == wire.p2:
+                continue
+            key = (wire.layer, wire.p1)
+            if key not in adjacent_points:
+                adjacent_points[key] = []
+            adjacent_points[key].append(wire.p2)
+            key = (wire.layer, wire.p2)
+            if key not in adjacent_points:
+                adjacent_points[key] = []
+            adjacent_points[key].append(wire.p1)
+        # sort adjacent points by angle
+        new_adjacent_points = dict()
+        for (layer, p), points in adjacent_points.items():
+            angles = [(x - p).angle() for x in points]
+            items = sorted((x, y) for x, y in zip(angles, points))
+            new_points = [x[1] for x in items]
+            new_adjacent_points[(layer, p)] = new_points
+        adjacent_points = new_adjacent_points
+        # hold wire widths at corner
+        # corner_width[(layer, point)] = X
+        corner_width = dict()
+        # for wires of different widths, make the corner a locked point
+        # for wires which have the same start and end point, make it locked
+        # for curved wires, make both ends a locked point
+        for wire in these_wires:
+            if wire.p1 == wire.p2:
+                locked_points[signal_name].add((wire.layer, wire.p1))
+                continue
+            if wire.curve != 0.0:
+                locked_points[signal_name].add((wire.layer, wire.p1))
+                locked_points[signal_name].add((wire.layer, wire.p2))
+                continue
+            for point in [wire.p1, wire.p2]:
+                key = (wire.layer, point)
+                if key not in corner_width:
+                    corner_width[key] = wire.width
+                else:
+                    if corner_width[key] != wire.width:
+                        locked_points[signal_name].add(key)
+        # hold corner points (2 wires joining)
+        corner_points = set()
+        # hold junction points (3+ wires intersecting)
+        junction_points = set()
+        # look through all points to find corner and junction points
+        if super_verbose:
+            print('  - Found %d locked PTHs: %s'
+                  % (len(these_locked_pths), these_locked_pths))
+            print('  - Found %d locked points: %s'
+                  % (len(these_locked_points), these_locked_points))
+        for key in wires_at_point.keys():
+            layer, point = key
+            wire_count = len(wires_at_point[key])
+            if super_verbose:
+                print('  - Looking at point %s on layer %s with %d neighbors'
+                      % (point, layer, wire_count))
+            # if only one wire, don't modify it
+            if wire_count == 1:
+                # I don't think I need to lock it
+                # locked_points[signal_name].add(point)
+                if super_verbose:
+                    print('    - Only one neighbor, skipping')
+                continue
+            # check for exact match to locked point/pth
+            if point in these_locked_pths:
+                if super_verbose:
+                    print('    - Point is a locked PTH')
+                continue
+            if (layer, point) in these_locked_points:
+                if super_verbose:
+                    print('    - Point is a locked point')
+                continue
+            # get distance to nearest locked point or pth
+            dist = float('inf')
+            for locked_layer, locked_point in these_locked_points:
+                if locked_layer != layer:
+                    continue
+                this_dist = point.distance_to(locked_point)
+                if this_dist < dist:
+                    dist = this_dist
+            for locked_point in these_locked_pths:
+                this_dist = point.distance_to(locked_point)
+                if this_dist < dist:
+                    dist = this_dist
+            # if distance to nearest locked point/pth is small, skip this point
+            if dist < 5 * native_resolution_mm:
+                if super_verbose:
+                    if dist == 0.0:
+                        print('    - Point is a locked PTH/point')
+                    else:
+                        print('    - Point is close to a locked PTH/point')
+                continue
+            # if more than 2 wires intersect here, mark it as a junction
+            if wire_count > 2:
+                if super_verbose:
+                    print('    - Point marked as a junction')
+                junction_points.add(key)
+                continue
+            # mark it as a corner point to be rounded later
+            if super_verbose:
+                print('    - Point marked as a corner')
+            assert wire_count == 2
+            corner_points.add(key)
+        # for each point, hold the distance to the next point we want to fillet
+        # rounded_distance[(layer, point)] = X
+        rounded_distance = dict()
+        # get distance to round each corner point
+        for (layer, point) in corner_points:
+            # get the two intersecting wires
+            local_wires = wires_at_point[(layer, point)]
+            assert len(local_wires) == 2
+            [wire_one, wire_two] = local_wires
+            # wires should have same width
+            assert wire_one.width == wire_two.width
+            assert wire_one.width == corner_width[(layer, point)]
+            p2 = point
+            p1 = wire_one.get_other_point(p2)
+            p3 = wire_two.get_other_point(p2)
+            assert p1 != p3
+            distance = get_transition_distance(wire_one.width, p1, p2, p3)
+            key = (layer, p2)
+            assert key not in rounded_distance
+            rounded_distance[key] = distance
+        # get distance to round each junction point
+        for (layer, point) in junction_points:
+            if not rounded_junctions:
+                break
+            # get all wires connected to junction
+            local_wires = wires_at_point[(layer, point)]
+            # if wires are different widths, ignore this point
+            wire_widths = set(x.width for x in local_wires)
+            if len(wire_widths) > 1:
+                continue
+            wire_width = float(min(wire_widths))
+            assert (layer, point) in corner_width
+            assert corner_width[(layer, point)] == local_wires[0].width
+            ### corner_width[(layer, point)] = local_wires[0].attrib['width']
+            # sort wires by angle from junction to the other point
+            wire_angles = []
+            for wire in local_wires:
+                p2 = wire.get_other_point(point)
+                wire_angles.append([(p2 - point).angle(), p2])
+            wire_spokes = [(angle, p, wire)
+                           for (angle, p), wire in zip(wire_angles,
+                                                       local_wires)]
+            # TODO: possible issue with sorting a Wire not implemented
+            # It shouldn't be needed, though.  I ran into this issue when
+            # running this on a file which had been teardropped.
+            wire_spokes.sort()
+            last_wire = list(wire_spokes[0])
+            last_wire[0] += 2.0 * math.pi
+            wire_spokes.append(tuple(last_wire))
+            # get target radius based on our settings
+            target_distance = float('inf')
+            # target_radius = wire_width + target_inner_radius_mils * 0.0254
+            for i in range(len(wire_spokes) - 1):
+                p1 = wire_spokes[i][1]
+                p3 = wire_spokes[i + 1][1]
+                distance = get_transition_distance(wire_width, p1, point, p3)
+                ### print(distance, p1, point, p3)
+                # assert distance < 1000
+                assert distance > 0.0
+                target_distance = min(target_distance, distance)
+            # target_distance = target_radius * math.tan(theta / 2.0)
+            key = (layer, point)
+            assert key not in rounded_distance
+            rounded_distance[key] = target_distance
+        if False and signal_name == 'N$1':
+            print('\n'.join('%s' % x for x in these_wires))
+            print('these_locked_points=%s' % these_locked_points)
+            print('these_locked_pths=%s' % these_locked_pths)
+            print('adjacent_points=%s' % adjacent_points)
+            print('corner_points=%s' % corner_points)
+            print('junction_points=%s' % junction_points)
+            print('rounded_distance=%s' % rounded_distance)
+            exit(1)
+        #if junction_points:
+        #    exit(1)
+        # look through each segment and find out length used by transitions
+        # committed_length[(layer, p1, p2)] = X
+        committed_length = dict()
+        for (layer, p1), points in adjacent_points.items():
+            if (layer, p1) not in rounded_distance:
+                continue
+            for p2 in points:
+                pa, pb = sorted([p1, p2])
+                key = (layer, pa, pb)
+                if key not in committed_length:
+                    committed_length[key] = 0.0
+                committed_length[key] += rounded_distance[(layer, p1)]
+        # find scaling factor for each point
+        # scaling_factor[(layer, point)] = X
+        scaling_factor = dict()
+        for (layer, p1, p2), length in committed_length.items():
+            segment_length = (p2 - p1).norm()
+            if segment_length < length:
+                scale = segment_length / length
+                key = (layer, p1)
+                scaling_factor[key] = min(scaling_factor.get(key, 1.0), scale)
+                key = (layer, p2)
+                scaling_factor[key] = min(scaling_factor.get(key, 1.0), scale)
+        # scale down rounding distance where necessary
+        for key, scale in scaling_factor.items():
+            if scale == 1.0:
+                continue
+            if key in rounded_distance:
+                rounded_distance[key] *= scale
+        # for very small radii, don't round the wire at all
+        for key in sorted(rounded_distance.keys()):
+            if rounded_distance[key] < native_resolution_mm * 10:
+                del rounded_distance[key]
+        # create remaining part of existing straight segments
+        for wire in these_wires:
+            # if not modified at all, just copy the wire
+            if ((wire.layer, wire.p1) not in rounded_distance and
+                    (wire.layer, wire.p2) not in rounded_distance):
+                new_wires.append(wire)
+                continue
+            direction = (wire.p2 - wire.p1).normalize()
+            ### layer_name = wire.attrib['layer']
+            key = (wire.layer, wire.p1)
+            pa = copy.copy(wire.p1)
+            if key in rounded_distance:
+                pa += direction * rounded_distance[key]
+            pb = copy.copy(wire.p2)
+            key = (wire.layer, wire.p2)
+            if key in rounded_distance:
+                pb -= direction * rounded_distance[key]
+            ### if layer_name not in wires_by_layer:
+            ###     wires_by_layer[layer_name] = []
+            # if entire wire is rounded, the middle doesn't need drawn
+            wire_length = (pa - pb).norm()
+            if wire_length < native_resolution_mm:
+                continue
+            # generate a new wire
+            ### command = generate_wire_command(signal_name,
+            ###                                  wire.attrib['width'],
+            ###                                pa,
+            ###                                pb)
+            new_wires.append(Wire.from_points(pa,
+                                              pb,
+                                              wire.width,
+                                              wire.signal,
+                                              wire.layer))
+        # create transitions
+        ### print(sorted(rounded_distance.keys()))
+        ### print(sorted(adjacent_points.keys()))
+        # be present in adjacent_points unless the latter is deep copied
+        # adjacent_points = copy.deepcopy(adjacent_points)
+        # corner_width = copy.deepcopy(corner_width)
+        # rounded_distance = copy.deepcopy(rounded_distance)
+        # adjacent_points = {key: value for key, value in adjacent_points.items()}
+        for (layer, p2), distance in rounded_distance.items():
+            # print(sorted(adjacent_points.keys()).index((layer, p2)))
+            # assert (layer, p2) in adjacent_points
+            points = adjacent_points[(layer, p2)]
+            # it's a junction point, so duplicate the starting point at the end
+            if len(points) > 2:
+                points.append(points[0])
+            # create polygon
+            if len(points) > 2 and polygons_in_junctions:
+                rounded_junction_count += 1
+                # create list of points along with angle for each
+                segments = []
+                for i in range(len(points) - 1):
+                    p1, p3 = points[i], points[i + 1]
+                    a1 = (p1 - p2).normalize()
+                    a2 = (p3 - p2).normalize()
+                    p2a = p2 + a1 * distance
+                    angle = a2.angle() - a1.angle()
+                    if angle < 0.0:
+                        angle += 2.0 * math.pi
+                    angle = math.pi - angle
+                    segments.append((p2a, -angle * 180.0 / math.pi))
+                # create polygon command
+                if polygons_in_junctions:
+                    # command = ('polygon \'%s\' %s (%s %s)'
+                    #            % (signal_name,
+                    #               corner_width[(layer, p2)],
+                    #               format_position(segments[-1][0].x),
+                    #               format_position(segments[-1][0].y)))
+                    # for i in range(len(segments)):
+                    #     command += (' %s (%s %s)'
+                    #                 % (format_angle(segments[i - 1][1]),
+                    #                    format_position(segments[i][0].x),
+                    #                    format_position(segments[i][0].y)))
+                    # command += ';'
+                    ### wires_by_layer[layer].append(command)
+                    polygon = Polygon()
+                    polygon.thermals = 'off'
+                    polygon.width = corner_width[(layer, p2)]
+                    polygon.signal = signal_name
+                    polygon.layer = layer
+                    polygon.vertices.extend(segments)
+                    new_polygons.append(polygon)
+                if traces_in_junctions or not polygons_in_junctions:
+                    for i in range(len(segments) - 1):
+                        break
+                        new_wires.append(Wire(p1=segments[i][0],
+                                              p2=segments[i + 1][0],
+                                              signal=signal_name,
+                                              width=corner_width[(layer, p2)],
+                                              layer=layer,
+                                              curve=segments[i][1]))
+                        # command = ('wire \'%s\' %s (%s %s) %s (%s %s);'
+                        #            % (signal_name,
+                        #               corner_width[(layer, p2)],
+                        #               format_position(segments[i][0].x),
+                        #               format_position(segments[i][0].y),
+                        #               format_angle(segments[i][1]),
+                        #               format_position(segments[i + 1][0].x),
+                        #               format_position(segments[i + 1][0].y)))
+                        ### wires_by_layer[layer].append(command)
+                continue
+            rounded_corner_count += 1
+            for i in range(len(points) - 1):
+                p1, p3 = points[i], points[i + 1]
+                a1 = (p2 - p1).normalize()
+                a2 = (p3 - p2).normalize()
+                p2a = p2 - a1 * distance
+                p2b = p2 + a2 * distance
+                new_wire = Wire.from_rounded_corner(
+                    p2a,
+                    p2,
+                    p2b,
+                    width=corner_width[(layer, p2)],
+                    signal=signal_name,
+                    layer=layer)
+                new_wires.append(new_wire)
+                #new_wire_command = create_signal(p2a, a1, p2b, a2,
+                #                                 signal_name,
+                #                                 corner_width[(layer, p2)])
+                ###if layer not in wires_by_layer:
+                ###    wires_by_layer[layer] = []
+                ### wires_by_layer[layer].append(new_wire_command)
+        # go through each segment and create transitions and lines
+    # replace wires with new wires
+    if verbose:
+        print('- Rounded %d corners and %d junctions.'
+              % (rounded_corner_count, rounded_junction_count))
+        print('- Replaced %d original wires with %d new wires'
+              % (len(board.wires), len(new_wires)))
+        print('- Augmented %d original polygons with %d new polygons'
+              % (len(board.polygons), len(new_polygons)))
+    # replace wires with new wires
+    board.wires = new_wires
+    ### TODO: remove
+    print('\n'.join('%s' % x for x in board.wires if x.signal == 'N$1'))
+    # add created polygons
+    board.new_polygons.extend(new_polygons)
+    # draw all wires
+    # commands.append('change thermals off;')
+    # for layer in sorted(wires_by_layer.keys()):
+    #     commands.append('layer %s;' % layer)
+    #     commands.extend(sorted(wires_by_layer[layer], key=wire_command_sort))
+    # # set view on top layer
+    # commands.append('change layer 1;')
+    # # ratsnest to get rid of airwires
+    # commands.append('grid last;')
+    # commands.append('optimize;')
+    # commands.append('set optimizing on;')
+    # commands.append('ratsnest;')
+    # # commands.append('set undo_log on;')
+    # commands.append('group (>0 0);')
+    # # backup board
+    # if backup_board_file:
+    #     backup_file(filename)
+    # # create script
+    # with open(script_filename, 'w') as f:
+    #     f.write('\n'.join(commands))
+    # print('- Script generated in board file directory.')
+    # print('- To run, open board and run "script %s".' % script_filename)
 
 
 def snap_wires_to_grid(filename, tolerance_inch=1e-6, spacing_inch=1e-3):
@@ -1550,6 +2290,65 @@ def read_contact_refs(filename):
     return contact_ref
 
 
+def read_pths_by_signal(board):
+    """Read and return pths by signal for the given board."""
+    pths = dict()
+    # add vias for each signal
+    for via in board.vias:
+        if via.signal not in pths:
+            pths[via.signal] = []
+        pths[via.signal].append(PTH.from_via(via))
+    # look at each package and add PTHs found in library
+    for element in board.elements:
+        # store element origin
+        origin = element.origin
+        # alias this footprint
+        footprint = board.libraries[element.library][element.footprint]
+        # add an entry for each pad in the footprint
+        for pad in footprint.pads:
+            point = copy.copy(pad.origin)
+            if element.rotation != 0:
+                point.rotate(element.rotation * math.pi / 180.0)
+            if element.mirrored:
+                point.x = -point.x
+            outer, inner = pad.get_diameters(board.dru)
+            if (element.name, pad.name) in board.contact_refs:
+                signal = board.contact_refs[(element.name, pad.name)]
+                if signal not in pths:
+                    pths[signal] = []
+                this_pth = PTH(origin + point, pad.drill, outer, inner, signal)
+                pths[signal].append(this_pth)
+    return pths
+
+
+def read_smds_by_signal(board):
+    """Read and return SMD pads by signal for the given board."""
+    points = dict()
+    # look at each package and add PTHs found in library
+    for element in board.elements:
+        # store element origin
+        origin = element.origin
+        # alias this footprint
+        footprint = board.libraries[element.library][element.footprint]
+        # add an entry for each pad in the footprint
+        for pad in footprint.smds:
+            point = copy.copy(pad.origin)
+            if element.rotation != 0:
+                point.rotate(element.rotation * math.pi / 180.0)
+            if element.mirrored:
+                layer = '16'
+                point.x = -point.x
+            else:
+                layer = '1'
+            if (element.name, pad.name) in board.contact_refs:
+                signal = board.contact_refs[(element.name, pad.name)]
+                this_point = (layer, snapped_point(origin + point))
+                if signal not in points:
+                    points[signal] = set()
+                points[signal].add(this_point)
+    return points
+
+
 def read_pad_pths(filename):
     """Read and return pths created by pads from the given file."""
     # hold all pths
@@ -1594,6 +2393,25 @@ def read_design_rules(filename):
         return DesignRules(dru_xml)
 
 
+def read_polygons(filename):
+    """Return all polygons in the file."""
+    tree = ElementTree.parse(filename)
+    root = tree.getroot()
+    polygons = []
+    for signals in root.iter('signals'):
+        for signal in signals.iter('signal'):
+            signal_name = signal.attrib['name']
+            for polygon in signal.iter('polygon'):
+                # skip wires not on layers 1-16
+                if int(polygon.attrib['layer']) < 1:
+                    continue
+                if int(polygon.attrib['layer']) > 16:
+                    continue
+                polygons.append(Polygon.from_xml(polygon))
+                polygons[-1].signal = signal_name
+    return polygons
+
+
 def read_wires(filename):
     """Return all wires in the file."""
     tree = ElementTree.parse(filename)
@@ -1601,13 +2419,14 @@ def read_wires(filename):
     wires = []
     for signals in root.iter('signals'):
         for signal in signals.iter('signal'):
+            signal_name = signal.attrib['name']
             for wire in signal.iter('wire'):
                 # skip wires not on layers 1-16
                 if int(wire.attrib['layer']) < 1:
                     continue
                 if int(wire.attrib['layer']) > 16:
                     continue
-                wires.append(Wire(wire, signal_name=signal.attrib['name']))
+                wires.append(Wire.from_xml(wire, signal_name=signal_name))
     return wires
 
 
@@ -1815,6 +2634,8 @@ def create_teardrop_vias(filename):
             point, _ = chain[-1].get_distance_along(alpha)
             chain[-1].p2 = point
             chain[-1].curve *= alpha
+    # hold number of teardrops created
+    teardrop_count = 0
     # hold wire commands to draw by layer
     wires_by_layer = dict()
     for chain in wire_chains:
@@ -1847,6 +2668,7 @@ def create_teardrop_vias(filename):
                                             via.signal,
                                             chain[0].width,
                                             create_teardrop_polygons)
+        teardrop_count += 1
         # delete portion of chain between via and junction point
         layer = chain[0].layer
         chain[:] = chain[wire_index:]
@@ -1878,6 +2700,7 @@ def create_teardrop_vias(filename):
     for layer in sorted(wires_by_layer.keys()):
         commands.append('layer %s;' % layer)
         commands.extend(sorted(wires_by_layer[layer], key=wire_command_sort))
+    print('- Created %d teardrops.' % teardrop_count)
     # set view on top layer
     commands.append('change layer 1;')
     # ratsnest to get rid of airwires
@@ -1894,10 +2717,20 @@ def create_teardrop_vias(filename):
                                    'create_teardrops.scr')
     with open(script_filename, 'w') as f:
         f.write('\n'.join(commands))
-    print('\nScript generated at %s' % script_filename)
+    print('- Script generated in board file directory.')
+    print('- To run, open board and run "script %s".' % script_filename)
 
 
-round_signals(board_file)
+def temp():
+    board = Board(board_file)
+    round_signals(board)
+    backup_file(board_file)
+    board.generate_script()
+    exit(0)
+    #create_teardrop_vias(board)
+
+
+temp()
 
 
 # execute as a script

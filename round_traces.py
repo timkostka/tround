@@ -442,7 +442,7 @@ class Wire:
         radius = distance / 2.0 / math.sin(self.curve / 2.0)
         radius = abs(radius)
         midpoint = self.p1 + 0.5 * (self.p2 - self.p1)
-        normal = (self.p2 - self.p1).rotate(math.pi / 2.0)
+        normal = (self.p2 - self.p1).rotate(math.tau / 4.0)
         normal.normalize()
         delta = radius ** 2 - midpoint.distance_to(self.p2) ** 2
         if delta < 0.0:
@@ -472,8 +472,8 @@ class Wire:
         center, radius, start_angle = self.get_curve_points()
         angle = start_angle + alpha * self.curve
         point = center + radius * Point2D(math.cos(angle), math.sin(angle))
-        tangent = Point2D(math.cos(angle + math.pi / 2.0),
-                          math.sin(angle + math.pi / 2.0))
+        tangent = Point2D(math.cos(angle + math.tau / 4.0),
+                          math.sin(angle + math.tau / 4.0))
         if self.curve < 0:
             tangent = -tangent
         return point, tangent
@@ -965,9 +965,9 @@ def create_signal(p1, a1, p2, a2, signal, width):
     a2.normalize()
     theta = math.acos(a1.dot(a2) / a1.norm() / a2.norm())
     ccw_test = a1.angle() + theta - a2.angle()
-    ccw_test = ((ccw_test + math.pi) % (2.0 * math.pi)) - math.pi
+    ccw_test = ((ccw_test + math.pi) % math.tau) - math.pi
     cw_test = a1.angle() - theta - a2.angle()
-    cw_test = ((cw_test + math.pi) % (2.0 * math.pi)) - math.pi
+    cw_test = ((cw_test + math.pi) % math.tau) - math.pi
     curve = theta
     assert abs(cw_test) < 1e-6 or abs(ccw_test) < 1e-6
     if abs(cw_test) < abs(ccw_test):
@@ -977,7 +977,7 @@ def create_signal(p1, a1, p2, a2, signal, width):
                   width,
                   format_position(p1.x),
                   format_position(p1.y),
-                  format_angle(curve * 180.0 / math.pi),
+                  format_angle(curve * 360.0 / math.tau),
                   format_position(p2.x),
                   format_position(p2.y)))
     return command
@@ -1064,11 +1064,8 @@ def get_transition_distance(width_mm, p1, p2, p3):
     # get opening angle
     theta = math.pi - get_angle_deviation(p1, p2, p3)
     assert 0 <= theta <= math.pi
-    # for angles close to 180, don't round the corner
-    #if theta * 180.0 / math.pi > 170.0:
-    #    return 0.0
     # skip very small angles
-    if theta * 180.0 / math.pi < 5.0:
+    if theta * 360.0 / math.tau < 5.0:
         print(theta)
         if verbose:
             print('Info: small angle encountered in get_transition_distance()')
@@ -1123,9 +1120,9 @@ def create_teardrop(joining_point,
         d3 = 1e100
     else:
         d3 = via.dot(via) / d3
-    start_angle_1 = tangent.angle() + math.pi / 2.0
-    start_angle_2 = tangent.angle() + math.pi / 2.0
-    start_angle_3 = tangent.angle() + math.pi / 2.0
+    start_angle_1 = tangent.angle() + math.tau / 4.0
+    start_angle_2 = tangent.angle() + math.tau / 4.0
+    start_angle_3 = tangent.angle() + math.tau / 4.0
     if d1 < 0:
         start_angle_1 -= math.pi
     if d2 < 0:
@@ -1337,7 +1334,7 @@ def obsolete_round_signals(filename):
         for point in [*footprint.pads, *footprint.smds]:
             point = Point2D(point.origin.x, point.origin.y)
             if part.rotation != 0:
-                point.rotate(part.rotation * math.pi / 180.0)
+                point.rotate(part.rotation * math.tau / 360.0)
             if part.mirrored:
                 point.x = -point.x
             # snap to grid
@@ -1472,10 +1469,10 @@ def obsolete_round_signals(filename):
                 cos_theta = 1.0
             theta = math.acos(cos_theta)
             # skip angles close to 180
-            if theta * 180.0 / math.pi > 170.0:
+            if theta * 360.0 / math.tau > 170.0:
                 continue
             # skip very small angles
-            if theta * 180.0 / math.pi < 5.0:
+            if theta * 360.0 / math.tau < 5.0:
                 continue
             target_distance = get_transition_distance(wire_width, theta)
             key = (layer, p2)
@@ -1505,7 +1502,7 @@ def obsolete_round_signals(filename):
                                                        these_wires)]
             these_wires.sort()
             last_wire = list(these_wires[0])
-            last_wire[0] += 2.0 * math.pi
+            last_wire[0] += math.tau
             these_wires.append(tuple(last_wire))
             # get target radius based on our settings
             target_distance = float('inf')
@@ -1515,13 +1512,13 @@ def obsolete_round_signals(filename):
                 p3 = these_wires[i + 1][1]
                 inner_angle = these_wires[i + 1][0] - these_wires[i][0]
                 theta = get_angle_deviation(p1, point, p3)
-                if inner_angle * 180.0 / math.pi > 181.0:
+                if inner_angle * 360.0 / math.tau > 181.0:
                     continue
                 # skip angles close to 180
-                if theta * 180.0 / math.pi > 170.0:
+                if theta * 360.0 / math.tau > 170.0:
                     continue
                 # skip very small angles
-                if theta * 180.0 / math.pi < 5.0:
+                if theta * 360.0 / math.tau < 5.0:
                     continue
                 this_distance = get_transition_distance(wire_width, theta)
                 target_distance = min(target_distance, this_distance)
@@ -1596,9 +1593,9 @@ def obsolete_round_signals(filename):
                     p2a = p2 + a1 * distance
                     angle = a2.angle() - a1.angle()
                     if angle < 0.0:
-                        angle += 2.0 * math.pi
+                        angle += math.tau
                     angle = math.pi - angle
-                    segments.append((p2a, -angle * 180.0 / math.pi))
+                    segments.append((p2a, -angle * 360.0 / math.tau))
                 # create polygon command
                 if polygons_in_junctions:
                     command = ('polygon \'%s\' %s (%s %s)'
@@ -1876,7 +1873,7 @@ def round_signals(board):
             # running this on a file which had been teardropped.
             wire_spokes.sort()
             last_wire = list(wire_spokes[0])
-            last_wire[0] += 2.0 * math.pi
+            last_wire[0] += math.tau
             wire_spokes.append(tuple(last_wire))
             # get target radius based on our settings
             target_distance = float('inf')
@@ -1979,7 +1976,7 @@ def round_signals(board):
                     p2a = p2 + a1 * distance
                     angle = a2.angle() - a1.angle()
                     if angle < 0.0:
-                        angle += 2.0 * math.pi
+                        angle += math.tau
                     angle = math.pi - angle
                     segments.append((p2a, -angle))
                 # create polygon command
@@ -2261,7 +2258,7 @@ def read_pths_by_signal(board):
         for pad in footprint.pads:
             point = copy.copy(pad.origin)
             if element.rotation != 0:
-                point.rotate(element.rotation * math.pi / 180.0)
+                point.rotate(element.rotation * math.tau / 360.0)
             if element.mirrored:
                 point.x = -point.x
             outer, inner = pad.get_diameters(board.dru)
@@ -2287,7 +2284,7 @@ def read_smds_by_signal(board):
         for pad in footprint.smds:
             point = copy.copy(pad.origin)
             if element.rotation != 0:
-                point.rotate(element.rotation * math.pi / 180.0)
+                point.rotate(element.rotation * math.tau / 360.0)
             if element.mirrored:
                 layer = '16'
                 point.x = -point.x
@@ -2324,7 +2321,7 @@ def read_pad_pths(filename):
         for pad in footprint.pads:
             point = copy.copy(pad.origin)
             if element.rotation != 0:
-                point.rotate(element.rotation * math.pi / 180.0)
+                point.rotate(element.rotation * math.tau / 360.0)
             if element.mirrored:
                 point.x = -point.x
             outer, inner = pad.get_diameters(dru)

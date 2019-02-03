@@ -161,6 +161,13 @@ class PTH:
         # connected signal
         self.signal = signal
 
+    def get_layer_diameter(self, layer):
+        """Return the plated diameter of the PTH on the given layer."""
+        if layer == '1' or layer == '16':
+            return self.outer_diameter
+        assert 1 < int(layer) < 16
+        return self.inner_diameter
+
     @staticmethod
     def from_via(via):
         """Return a PTH created from the given Via."""
@@ -289,6 +296,7 @@ class Polygon:
         self.thermals = 'on'
         self.locked = 'no'
         # self.verticies = [(Point2D(), curve), ...]
+        # curve is given in radians
         self.vertices = []
 
     @staticmethod
@@ -303,7 +311,7 @@ class Polygon:
         for vertex in polygon_xml.iter('vertex'):
             curve = 0.0
             if 'curve' in vertex.attrib:
-                curve = float(vertex.attrib['curve'])
+                curve = float(vertex.attrib['curve']) * math.tau / 360.0
             polygon.vertices.append((Point2D(float(vertex.attrib['x']),
                                              float(vertex.attrib['y'])),
                                      curve))
@@ -328,10 +336,11 @@ class Polygon:
             command += ' \'%s\'' % self.signal
         command += ' %s' % self.width
         for point, curve in self.vertices:
+            assert -2 * math.pi < curve < 2 * math.pi
             command += (' (%s %s) %s' %
                         (format_position(point.x),
                          format_position(point.y),
-                         format_angle(curve)))
+                         format_angle(curve * 180.0 / math.pi)))
         command += (' (%s %s);' %
                     (format_position(self.vertices[0][0].x),
                      format_position(self.vertices[0][0].y)))
@@ -366,6 +375,7 @@ class Wire:
         self.signal = signal
         self.width = width
         self.layer = layer
+        # curve is given in radians
         self.curve = curve
 
     @staticmethod
@@ -378,9 +388,9 @@ class Wire:
         cosine = min(1.0, max(-1.0, a1.dot(a2)))
         theta = math.acos(cosine)
         ccw_test = a1.angle() + theta - a2.angle()
-        ccw_test = ((ccw_test + math.pi) % (2.0 * math.pi)) - math.pi
+        ccw_test = ((ccw_test + math.pi) % math.tau) - math.pi
         cw_test = a1.angle() - theta - a2.angle()
-        cw_test = ((cw_test + math.pi) % (2.0 * math.pi)) - math.pi
+        cw_test = ((cw_test + math.pi) % math.tau) - math.pi
         assert abs(cw_test) < 1e-6 or abs(ccw_test) < 1e-6
         if abs(cw_test) < abs(ccw_test):
             theta = -theta
@@ -399,7 +409,7 @@ class Wire:
         wire.width = float(wire_xml.attrib['width'])
         wire.layer = wire_xml.attrib['layer']
         if 'curve' in wire_xml.attrib:
-            wire.curve = float(wire_xml.attrib['curve']) * math.pi / 180.0
+            wire.curve = float(wire_xml.attrib['curve']) * math.tau / 360.0
         else:
             wire.curve = 0.0
         return wire
@@ -479,14 +489,15 @@ class Wire:
         if self.curve == 0.0:
             return self.p1.distance_to(self.p2)
         _, radius, _ = self.get_curve_points()
-        return radius * abs(self.curve) * math.pi / 180.0
+        return radius * abs(self.curve) * math.tau / 360.0
 
     def get_command(self):
         """Return the command to recreate the wire."""
         if self.curve == 0.0:
             angle = ''
         else:
-            angle = ' %s' % format_angle(self.curve * 180.0 / math.pi)
+            assert -math.tau < self.curve < math.tau
+            angle = ' %s' % format_angle(self.curve * 360.0 / math.tau)
         command = ('wire \'%s\' %s (%s %s)%s (%s %s);'
                    % (self.signal if self.signal else '',
                       format_position(self.width),
@@ -659,26 +670,26 @@ class Board:
         """Create a board backup file."""
         backup_file(self.filename)
 
-    def generate_script(self, wires=True, polygons=True, vias=False):
+    def generate_script(self):
         """Generate a script which generates copper in this Board."""
         # hold script commands to run
         commands = []
         commands.append('set optimizing off;')
         commands.append('set wire_bend 2;')
         commands.append('grid mm;')
-        if wires:
-            commands.append('display none;')
-            commands.append('display 1 to 16;')
-            commands.append('group all;')
-            commands.append('ripup (>0 0);')
+        commands.append('display none;')
+        commands.append('display 1 to 16;')
+        commands.append('group all;')
+        commands.append('ripup (>0 0);')
         commands.append('display none;')
         commands.append('display preset_standard;')
         copper_by_layer = dict()
-        if wires:
-            for wire in self.wires:
-                if wire.layer not in copper_by_layer:
-                    copper_by_layer[wire.layer] = []
-                copper_by_layer[wire.layer].append(wire.get_command())
+        for wire in self.wires:
+            print(wire)
+            assert type(wire.layer) is str
+            if wire.layer not in copper_by_layer:
+                copper_by_layer[wire.layer] = []
+            copper_by_layer[wire.layer].append(wire.get_command())
         # add copper commands
         for layer in sorted(copper_by_layer.keys()):
             commands.append('change layer %s;' % layer)
@@ -686,7 +697,6 @@ class Board:
         for polygon in self.new_polygons:
             commands.append('change layer %s;' % polygon.layer)
             commands.extend(polygon.get_commands())
-        assert not vias
         # create script filename
         script_filename = os.path.join(os.path.dirname(self.filename),
                                        'round_traces.scr')
@@ -1073,7 +1083,7 @@ def get_transition_distance(width_mm, p1, p2, p3):
     return length
 
 
-def create_teardrop(joining_point,
+def OBSOLETE_create_teardrop(joining_point,
                     tangent,
                     via_point,
                     radius,
@@ -1200,6 +1210,152 @@ def create_teardrop(joining_point,
                            format_position(p2.x),
                            format_position(p2.y)))
     return commands
+
+
+# TODO: rename so it isn't close to create_teardrops()
+def create_teardrop(joining_point,
+                    tangent,
+                    via_point,
+                    radius,
+                    signal,
+                    width,
+                    layer,
+                    polygon_teardrop=False):
+    """Return wires and polygons for creating the given teardrop."""
+    # hold wires to create for this teardrop
+    teardrop_wires = []
+    # hold polygons to create for this teardrop
+    teardrop_polygons = []
+    # tangent should point towards the via
+    # (but this is not strictly necessary)
+    via = via_point - joining_point
+    assert tangent.dot(via) >= 0.0
+    # point = point - via_point
+    # get direction normal to tangent
+    normal = Point2D(tangent.y, -tangent.x)
+    # d1 = (via.dot(via) - radius ** 2) / (via.dot(normal) - radius)
+    # d2 = (via.dot(via) - radius ** 2) / (via.dot(normal) - radius)
+    # find d1 and d2
+    d1 = 2.0 * (normal.dot(via) - radius)
+    if d1 == 0.0:
+        d1 = 1e100
+    else:
+        d1 = (via.dot(via) - radius ** 2) / d1
+    d2 = 2.0 * (normal.dot(via) + radius)
+    if d2 == 0.0:
+        d2 = 1e100
+    else:
+        d2 = (via.dot(via) - radius ** 2) / d2
+    d3 = 2.0 * via.dot(normal)
+    if d3 == 0:
+        d3 = 1e100
+    else:
+        d3 = via.dot(via) / d3
+    start_angle_1 = tangent.angle() + math.pi / 2.0
+    start_angle_2 = tangent.angle() + math.pi / 2.0
+    start_angle_3 = tangent.angle() + math.pi / 2.0
+    if d1 < 0:
+        start_angle_1 -= math.pi
+    if d2 < 0:
+        start_angle_2 -= math.pi
+    if d3 < 0:
+        start_angle_3 -= math.pi
+    end_angle_1 = (via - d1 * normal).angle()
+    end_angle_2 = (via - d2 * normal).angle()
+    end_angle_3 = (via - d3 * normal).angle()
+    # find point on radius to join to
+    center = joining_point + d1 * normal
+    p1 = via_point
+    if center.distance_to(p1) < abs(d1):
+        p1 = p1 + radius * Point2D(math.cos(end_angle_1), math.sin(end_angle_1))
+    else:
+        p1 = p1 - radius * Point2D(math.cos(end_angle_1), math.sin(end_angle_1))
+    # find second point on radius to join with
+    center = joining_point + d2 * normal
+    p2 = via_point
+    if center.distance_to(p2) < abs(d2):
+        p2 = p2 + radius * Point2D(math.cos(end_angle_2), math.sin(end_angle_2))
+    else:
+        p2 = p2 - radius * Point2D(math.cos(end_angle_2), math.sin(end_angle_2))
+    commands = []
+    # end_angle_1 = math.atan2(via_point - d1 * normal)
+    # end_angle_2 = math.atan2(via_point - d2 * normal)
+    # p3 = via_point
+    a1 = (end_angle_1 - start_angle_1) * 360.0 / math.tau
+    a1 = ((a1 + 180) % 360) - 180
+    a2 = (end_angle_2 - start_angle_2) * 360.0 / math.tau
+    a2 = ((a2 + 180) % 360) - 180
+    a3 = (end_angle_3 - start_angle_3) * 360.0 / math.tau
+    a3 = ((a3 + 180) % 360) - 180
+    a1 *= math.tau / 360.0
+    a2 *= math.tau / 360.0
+    a3 *= math.tau / 360.0
+    # add initial line joining via to the wire chain
+    new_wire = Wire(joining_point, via_point, signal, width, layer, a3)
+    teardrop_wires.append(new_wire)
+    # commands.append('wire \'%s\' %s (%s %s) %s (%s %s);'
+    #                 % (signal,
+    #                    width,
+    #                    format_position(joining_point.x),
+    #                    format_position(joining_point.y),
+    #                    format_angle(a3),
+    #                    format_position(via_point.x),
+    #                    format_position(via_point.y)))
+    # add polygon or lines
+    if polygon_teardrop:
+        new_polygon = Polygon()
+        new_polygon.thermals = 'off'
+        new_polygon.layer = layer
+        new_polygon.rank = '1'
+        new_polygon.width = width
+        new_polygon.signal = signal,
+        new_polygon.vertices.append((joining_point, a1))
+        new_polygon.vertices.append((p1, 0.0))
+        new_polygon.vertices.append((via_point, 0.0))
+        new_polygon.vertices.append((p2, -a2))
+        teardrop_polygons.append(new_polygon)
+        # polygon = ('polygon \'%s\' %s (%s %s) %s (%s %s)'
+        #            % (signal,
+        #               width,
+        #               format_position(joining_point.x),
+        #               format_position(joining_point.y),
+        #               format_angle(a1),
+        #               format_position(p1.x),
+        #               format_position(p1.y)))
+        # polygon += (' %s (%s %s) %s (%s %s)'
+        #             % (format_angle(0),
+        #                format_position(via_point.x),
+        #                format_position(via_point.y),
+        #                format_angle(0),
+        #                format_position(p2.x),
+        #                format_position(p2.y)))
+        # polygon += (' %s (%s %s);'
+        #             % (format_angle(-a2),
+        #                format_position(joining_point.x),
+        #                format_position(joining_point.y)))
+        # commands.append(polygon)
+    else:
+        new_wire = Wire(joining_point, p1, signal, width, layer, a1)
+        teardrop_wires.append(new_wire)
+        new_wire = Wire(joining_point, p2, signal, width, layer, a2)
+        teardrop_wires.append(new_wire)
+        # commands.append('wire \'%s\' %s (%s %s) %s (%s %s);'
+        #                 % (signal,
+        #                    width,
+        #                    format_position(joining_point.x),
+        #                    format_position(joining_point.y),
+        #                    format_angle(a1),
+        #                    format_position(p1.x),
+        #                    format_position(p1.y)))
+        # commands.append('wire \'%s\' %s (%s %s) %s (%s %s);'
+        #                 % (signal,
+        #                    width,
+        #                    format_position(joining_point.x),
+        #                    format_position(joining_point.y),
+        #                    format_angle(a2),
+        #                    format_position(p2.x),
+        #                    format_position(p2.y)))
+    return teardrop_wires, teardrop_polygons
 
 
 def snapped_point(point):
@@ -1639,10 +1795,7 @@ def obsolete_round_signals(filename):
 
 
 def round_signals(board):
-    """
-    Round signals within the given Board object.
-
-    """
+    """Round signals within the given Board object."""
     if verbose:
         print('\nRounding signals in board')
     # hold positions of PTHs which should not be moved for each signal
@@ -1956,7 +2109,7 @@ def round_signals(board):
                     if angle < 0.0:
                         angle += 2.0 * math.pi
                     angle = math.pi - angle
-                    segments.append((p2a, -angle * 180.0 / math.pi))
+                    segments.append((p2a, -angle))
                 # create polygon command
                 if polygons_in_junctions:
                     polygon = Polygon()
@@ -2413,27 +2566,10 @@ def get_nearest_point(point, list_of_points):
     return nearest_distance, nearest_point
 
 
-def create_teardrop_vias(filename):
-    """Create a script to convert pths to teardrop pths in the given file."""
-    # hold commands to redraw all pths/wires
-    commands = []
-    commands.append('set optimizing off;')
-    commands.append('change thermals off;')
-    commands.append('display none;')
-    commands.append('display 1 to 16;')
-    commands.append('group all;')
-    commands.append('ripup (>0 0);')
-    commands.append('display preset_standard;')
-    commands.append('set wire_bend 2;')
-    commands.append('grid mm;')
-    commands.append('change drill %.9f;' % (0.013 * 25.4))
-    # hold design rules
-    dru = read_design_rules(filename)
-    # hold all pths
-    pths = []
-    # hold all vias
-    vias = read_vias(filename, dru)
-    print('Found %d vias' % len(vias))
+def OBSOLETE_create_teardrops(filename):
+    """Teardrop PTHs and vias within the given Board object."""
+    if verbose:
+        print('\nCreating teardrops in board')
     # add vias to pths
     for via in vias:
         pths.append(PTH(via.origin,
@@ -2595,6 +2731,7 @@ def create_teardrop_vias(filename):
                                             (via_diameter - wire_width) / 2.0,
                                             via.signal,
                                             chain[0].width,
+                                            chain[0].layer,
                                             create_teardrop_polygons)
         teardrop_count += 1
         # delete portion of chain between via and junction point
@@ -2649,13 +2786,231 @@ def create_teardrop_vias(filename):
     print('- To run, open board and run "script %s".' % script_filename)
 
 
+def create_teardrops(board):
+    """Teardrop PTHs and vias within the given Board object."""
+    if verbose:
+        print('\nCreating teardrops in board')
+    pths_by_signal = read_pths_by_signal(board)
+    # read in through hole pads
+    # if create_teardrops_on_pths:
+    #     pads = read_pad_pths(filename)
+    #     print('Found %d pads' % len(pads))
+    #     pad_tolerance_mm = 10 * native_resolution_mm
+    #     for pad in pads:
+    #         distance, point = get_nearest_point(pad.origin, wire_points)
+    #         if distance > 0 and distance < pad_tolerance_mm:
+    #             pad.origin = point
+    #     pths += pads
+    #     # add through hold pads to pths
+    if verbose:
+        print('- Found %d total PTHs in %d signals'
+              % (sum(len(x) for x in pths_by_signal), len(pths_by_signal)))
+    # get list of all signals within wires and pths
+    signal_names = set(wire.signal for wire in board.wires)
+    signal_names.update(pths_by_signal.keys())
+    # add signal name keys to PTH dict
+    for signal in signal_names:
+        if signal not in pths_by_signal:
+            pths_by_signal[signal] = []
+    # sort wires by signal
+    wires_by_signal = dict()
+    for signal in signal_names:
+        wires_by_signal[signal] = []
+    for wire in board.wires:
+        wires_by_signal[wire.signal].append(wire)
+    # hold number of teardrops created
+    teardrop_count = 0
+    # get list of all wire end points
+    wire_points = set()
+    for wire in board.wires:
+        wire_points.add(wire.p1)
+        wire_points.add(wire.p2)
+    # hold wires to create
+    new_wires = []
+    # hold polygons to create
+    new_polygons = []
+    # since pad positions are imprecise, snap them to the nearest wire end
+    # point if it's close enough
+    for signal in sorted(signal_names):
+        # alias pths for this signal
+        these_pths = pths_by_signal[signal]
+        # alias wires for this signal
+        these_wires = wires_by_signal[signal]
+        if super_verbose:
+            print('- Processing signal "%s"' % signal)
+            print('  - Found %d wires and %d PTHs'
+                  % (len(these_wires), len(these_pths)))
+        # store wires at each (layer, point)
+        wires_at_point = dict()
+        for wire in these_wires:
+            for point in [wire.p1, wire.p2]:
+                this_point = (wire.layer, point)
+                if this_point not in wires_at_point:
+                    wires_at_point[this_point] = []
+                wires_at_point[this_point].append(wire)
+        # get map from point to PTH
+        pths_at_point = {pth.origin: pth for pth in these_pths}
+        # store points that are midway through a wire chain
+        mid_points = set(key
+                         for key, value in wires_at_point.items()
+                         if len(value) == 2 and key[1] not in pths_at_point)
+        # store wires used by wire chains
+        used_wires = set()
+        # store wire chain
+        wire_chains = []
+        # go through each wire and start wire chains from each PTH
+        for wire in wires_by_signal[signal]:
+            for p in [wire.p1, wire.p2]:
+                # point = (wire.layer, p)
+                if p not in pths_at_point:
+                    continue
+                used_wires.add(wire)
+                # start chain with this wire, set p1 to the via location
+                this_chain = [wire]
+                wire_chains.append(this_chain)
+                if p != wire.p1:
+                    assert p == wire.p2
+                    this_chain[0] = wire.reversed()
+                    assert this_chain[0].p1 == p
+                while (wire.layer, this_chain[-1].p2) in mid_points:
+                    this_point = (wire.layer, this_chain[-1].p2)
+                    next_wires = wires_at_point[this_point]
+                    assert len(next_wires) == 2
+                    if (next_wires[0].p1 == this_chain[-1].p1 or
+                            next_wires[0].p2 == this_chain[-1].p1):
+                        this_chain.append(next_wires[1])
+                        used_wires.add(next_wires[1])
+                    else:
+                        assert (next_wires[1].p1 == this_chain[-1].p1 or
+                                next_wires[1].p2 == this_chain[-1].p1)
+                        this_chain.append(next_wires[0])
+                        used_wires.add(next_wires[0])
+                    if this_chain[-1].p2 == this_chain[-2].p2:
+                        this_chain[-1] = this_chain[-1].reversed()
+                    else:
+                        assert this_chain[-1].p1 == this_chain[-2].p2
+        # get wires not found in any chain
+        unused_wires = [wire for wire in these_wires if wire not in used_wires]
+        if super_verbose:
+            print('  - Found %d wire chains and %d wires not in chains'
+                  % (len(wire_chains), len(unused_wires)))
+        # for chains which have a via at both ends, delete the second half
+        for chain in wire_chains:
+            assert chain[0].p1 in pths_at_point
+            # if there's not a via at the end, keep the entire chain
+            if chain[-1].p2 not in pths_at_point:
+                continue
+            # get total length of chain
+            chain_length = sum(wire.get_length() for wire in chain)
+            assert chain_length > 0.0
+            # find approximate midpoint
+            start_pth = pths_at_point[chain[0].p1]
+            start_length = start_pth.get_layer_diameter(chain[0].layer) / 2.0
+            end_pth = pths_at_point[chain[-1].p2]
+            end_length = end_pth.get_layer_diameter(chain[-1].layer) / 2.0
+            target_length = start_length
+            target_length += (chain_length - start_length - end_length) / 2.0
+            # find exact midpoint
+            length_so_far = 0.0
+            index = 0
+            while length_so_far + chain[index].get_length() < target_length:
+                length_so_far += chain[index].get_length()
+                index += 1
+            # find proportion along this segment
+            alpha = (target_length - length_so_far) / chain[index].get_length()
+            if alpha < 0.0:
+                alpha = 0.0
+            elif alpha > 1.0:
+                alpha = 1.0
+            # delete trail of chain
+            if alpha == 0.0:
+                chain[:] = chain[:index]
+            else:
+                chain[:] = chain[:index + 1]
+                if alpha < 1.0:
+                    chain[-1] = copy.copy(chain[-1])
+                    point, _ = chain[-1].get_distance_along(alpha)
+                    chain[-1].p2 = point
+                    chain[-1].curve *= alpha
+        # create teardrops
+        for chain in wire_chains:
+            via_point = chain[0].p1
+            wire_width = chain[0].width
+            pth = pths_at_point[chain[0].p1]
+            via_diameter = pth.get_layer_diameter(chain[0].layer)
+            total_chain_length = sum(x.get_length() for x in chain)
+            # if chain is too short, don't do anything
+            if total_chain_length < via_diameter / 2.0 + teardrop_tolerance_mm:
+                if super_verbose:
+                    print('  - Skipping too short wire chain')
+                continue
+            # can't teardrop pths if the wires are bigger than the via diameter
+            if via_diameter <= wire_width + teardrop_tolerance_mm:
+                if super_verbose:
+                    print('  - Skipping wire chain with large trace width')
+                continue
+            r1 = via_diameter / 2.0
+            r2 = teardrop_inner_radius_mm + wire_width / 2.0
+            d = math.sqrt((r1 + r2) ** 2 - (r2 + wire_width / 2.0) ** 2)
+            result = find_point_on_chain(chain, via_point, d)
+            # if chain is not long enough, use the last point
+            if result is None:
+                # TODO: make sure it's far enough away from the via
+                if super_verbose:
+                    print('  - Truncating teardrop because of short trace')
+                # use end of chain
+                result = [list(chain[-1].get_distance_along(1.0)),
+                          (len(chain) - 1, 1.0)]
+                result[0][1] = -result[0][1]
+            (junction_point, tangent), (wire_index, alpha) = result
+            radius = (via_diameter - wire_width) / 2.0
+            result = create_teardrop(junction_point,
+                                     tangent,
+                                     via_point,
+                                     radius,
+                                     chain[0].signal,
+                                     chain[0].width,
+                                     chain[0].layer,
+                                     create_teardrop_polygons)
+            teardrop_wires, teardrop_polygons = result
+            # if result failed, don't truncate the chain
+            if not teardrop_wires and not teardrop_polygons:
+                if super_verbose:
+                    print('  - Teardrop generation failed')
+                continue
+            new_wires.extend(teardrop_wires)
+            new_polygons.extend(teardrop_polygons)
+            teardrop_count += 1
+            # delete portion of chain between via and junction point
+            layer = chain[0].layer
+            chain[:] = chain[wire_index:]
+            if alpha == 1.0:
+                chain[:] = chain[1:]
+            elif alpha > 0:
+                point, _ = chain[0].get_distance_along(alpha)
+                chain[0].curve *= 1.0 - alpha
+                chain[0].p1 = junction_point
+        # add wires in chains
+        for chain in wire_chains:
+            new_wires.extend(chain)
+        # add wires not found in chains
+        new_wires.extend(unused_wires)
+    if verbose:
+        print('- Created %d teardrops' % teardrop_count)
+    # replace wires with those created
+    board.wires = new_wires
+    # add new polygons, if any
+    board.new_polygons.extend(new_polygons)
+
+
 def temp():
     board = Board(board_file)
     round_signals(board)
+    create_teardrops(board)
     backup_file(board_file)
     board.generate_script()
     exit(0)
-    #create_teardrop_vias(board)
+    #create_teardrops(board)
 
 
 temp()
@@ -2685,13 +3040,13 @@ if __name__ == "__main__":
         if option == '--round':
             round_signals(board_filename)
         elif option == '--teardrop':
-            create_teardrop_vias(board_filename)
+            create_teardrops(board_filename)
         else:
             print('ERROR: option \"%s\" not recognized' % option)
 
 
 # snap_wires_to_grid(board_file)
 
-# create_teardrop_vias(board_file)
+# create_teardrops(board_file)
 
 # delete_via_teardrops(board_file)

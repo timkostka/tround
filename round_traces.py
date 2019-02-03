@@ -295,7 +295,7 @@ class Polygon:
         self.isolate = 0.0
         self.thermals = 'on'
         self.locked = 'no'
-        # self.verticies = [(Point2D(), curve), ...]
+        # self.vertices = [(Point2D(), curve), ...]
         # curve is given in radians
         self.vertices = []
 
@@ -311,6 +311,7 @@ class Polygon:
         for vertex in polygon_xml.iter('vertex'):
             curve = 0.0
             if 'curve' in vertex.attrib:
+                # convert from degrees in file to radians in object
                 curve = float(vertex.attrib['curve']) * math.tau / 360.0
             polygon.vertices.append((Point2D(float(vertex.attrib['x']),
                                              float(vertex.attrib['y'])),
@@ -336,11 +337,11 @@ class Polygon:
             command += ' \'%s\'' % self.signal
         command += ' %s' % self.width
         for point, curve in self.vertices:
-            assert -2 * math.pi < curve < 2 * math.pi
+            assert -math.tau < curve < math.tau
             command += (' (%s %s) %s' %
                         (format_position(point.x),
                          format_position(point.y),
-                         format_angle(curve * 180.0 / math.pi)))
+                         format_angle(curve * 360.0 / math.tau)))
         command += (' (%s %s);' %
                     (format_position(self.vertices[0][0].x),
                      format_position(self.vertices[0][0].y)))
@@ -438,7 +439,7 @@ class Wire:
         assert self.curve != 0
         distance = self.p1.distance_to(self.p2)
         # sin(theta / 2) == (d / 2) / r
-        radius = distance / 2.0 / math.sin(self.curve / 2.0 * math.pi / 180.0)
+        radius = distance / 2.0 / math.sin(self.curve / 2.0)
         radius = abs(radius)
         midpoint = self.p1 + 0.5 * (self.p2 - self.p1)
         normal = (self.p2 - self.p1).rotate(math.pi / 2.0)
@@ -469,7 +470,7 @@ class Wire:
             return point, tangent
         #
         center, radius, start_angle = self.get_curve_points()
-        angle = start_angle + alpha * self.curve * math.pi / 180
+        angle = start_angle + alpha * self.curve
         point = center + radius * Point2D(math.cos(angle), math.sin(angle))
         tangent = Point2D(math.cos(angle + math.pi / 2.0),
                           math.sin(angle + math.pi / 2.0))
@@ -489,7 +490,7 @@ class Wire:
         if self.curve == 0.0:
             return self.p1.distance_to(self.p2)
         _, radius, _ = self.get_curve_points()
-        return radius * abs(self.curve) * math.tau / 360.0
+        return radius * abs(self.curve)
 
     def get_command(self):
         """Return the command to recreate the wire."""

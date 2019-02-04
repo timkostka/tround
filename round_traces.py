@@ -707,7 +707,8 @@ class Board:
                                        'round_traces.scr')
         if verbose:
             print('- Script generated in board file directory.')
-            print('- To run, open board and run "script %s".' % script_filename)
+            print('- To run, open board and run "script %s".'
+                  % script_filename)
         commands.append('display preset_standard;')
         commands.append('change layer 1;')
         commands.append('grid last;')
@@ -1152,9 +1153,6 @@ def round_signals(board):
             wire_spokes = [(angle, p, wire)
                            for (angle, p), wire in zip(wire_angles,
                                                        local_wires)]
-            # TODO: possible issue with sorting a Wire not implemented
-            # It shouldn't be needed, though.  I ran into this issue when
-            # running this on a file which had been teardropped.
             wire_spokes.sort()
             last_wire = list(wire_spokes[0])
             last_wire[0] += math.tau
@@ -1878,12 +1876,17 @@ def teardrop_board_vias(board):
             result = find_point_on_chain(chain, via_point, d)
             # if chain is not long enough, use the last point
             if result is None:
-                # TODO: make sure it's far enough away from the via
                 if super_verbose:
                     print('  - Truncating teardrop because of short trace')
                 # use end of chain
                 result = [list(chain[-1].get_distance_along(1.0)),
                           (len(chain) - 1, 1.0)]
+                distance = via_point.distance_to(result[0][0])
+                if distance < (via_diameter + wire_width) / 2.0:
+                    if super_verbose:
+                        print('  - Truncated chain too short and will be '
+                              'skipped')
+                    continue
                 result[0][1] = -result[0][1]
             (junction_point, tangent), (wire_index, alpha) = result
             radius = (via_diameter - wire_width) / 2.0

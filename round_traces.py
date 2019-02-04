@@ -94,7 +94,8 @@ project_directory = r'C:\Users\tdkostk\Documents\eagle\projects'
 # board_file = r'\sct-adapters\sct-terminal-block-6.brd'
 # board_file = r'\sct-adapters\sct-terminal-block-6-round.brd'
 # board_file = r'\sct-adapters\sct-bnc-male.brd'
-board_file = r'\micro_ohmmeter\micro_ohmmeter_rev5.brd'
+# board_file = r'\micro_ohmmeter\micro_ohmmeter_rev5.brd'
+board_file = r'\octoversity\octoversity_rev3.brd'
 
 board_file = project_directory + board_file
 
@@ -818,7 +819,6 @@ def get_transition_distance(width_mm, p1, p2, p3):
     return length
 
 
-# TODO: rename so it isn't close to create_teardrops()
 def create_teardrop(joining_point,
                     tangent,
                     via_point,
@@ -839,8 +839,6 @@ def create_teardrop(joining_point,
     # point = point - via_point
     # get direction normal to tangent
     normal = Point2D(tangent.y, -tangent.x)
-    # d1 = (via.dot(via) - radius ** 2) / (via.dot(normal) - radius)
-    # d2 = (via.dot(via) - radius ** 2) / (via.dot(normal) - radius)
     # find d1 and d2
     d1 = 2.0 * (normal.dot(via) - radius)
     if d1 == 0.0:
@@ -895,14 +893,6 @@ def create_teardrop(joining_point,
     # add initial line joining via to the wire chain
     new_wire = Wire(joining_point, via_point, signal, width, layer, a3)
     teardrop_wires.append(new_wire)
-    # commands.append('wire \'%s\' %s (%s %s) %s (%s %s);'
-    #                 % (signal,
-    #                    width,
-    #                    format_position(joining_point.x),
-    #                    format_position(joining_point.y),
-    #                    format_angle(a3),
-    #                    format_position(via_point.x),
-    #                    format_position(via_point.y)))
     # add polygon or lines
     if polygon_teardrop:
         new_polygon = Polygon()
@@ -916,47 +906,11 @@ def create_teardrop(joining_point,
         new_polygon.vertices.append((via_point, 0.0))
         new_polygon.vertices.append((p2, -a2))
         teardrop_polygons.append(new_polygon)
-        # polygon = ('polygon \'%s\' %s (%s %s) %s (%s %s)'
-        #            % (signal,
-        #               width,
-        #               format_position(joining_point.x),
-        #               format_position(joining_point.y),
-        #               format_angle(a1),
-        #               format_position(p1.x),
-        #               format_position(p1.y)))
-        # polygon += (' %s (%s %s) %s (%s %s)'
-        #             % (format_angle(0),
-        #                format_position(via_point.x),
-        #                format_position(via_point.y),
-        #                format_angle(0),
-        #                format_position(p2.x),
-        #                format_position(p2.y)))
-        # polygon += (' %s (%s %s);'
-        #             % (format_angle(-a2),
-        #                format_position(joining_point.x),
-        #                format_position(joining_point.y)))
-        # commands.append(polygon)
     else:
         new_wire = Wire(joining_point, p1, signal, width, layer, a1)
         teardrop_wires.append(new_wire)
         new_wire = Wire(joining_point, p2, signal, width, layer, a2)
         teardrop_wires.append(new_wire)
-        # commands.append('wire \'%s\' %s (%s %s) %s (%s %s);'
-        #                 % (signal,
-        #                    width,
-        #                    format_position(joining_point.x),
-        #                    format_position(joining_point.y),
-        #                    format_angle(a1),
-        #                    format_position(p1.x),
-        #                    format_position(p1.y)))
-        # commands.append('wire \'%s\' %s (%s %s) %s (%s %s);'
-        #                 % (signal,
-        #                    width,
-        #                    format_position(joining_point.x),
-        #                    format_position(joining_point.y),
-        #                    format_angle(a2),
-        #                    format_position(p2.x),
-        #                    format_position(p2.y)))
     return teardrop_wires, teardrop_polygons
 
 
@@ -1007,7 +961,6 @@ def round_signals(board):
         print('- Found %d PTHs for %d signals'
               % (sum(len(x) for x in locked_pths.values()),
                  len(locked_pths)))
-    # print(locked_pths)
     # hold points which should not be moved for each signal
     # locked_points[signal_name] = {(layer_name, Point2D), ...}
     locked_points = read_smds_by_signal(board)
@@ -1015,7 +968,6 @@ def round_signals(board):
         print('- Found %d SMD pads for %d signals'
               % (sum(len(x) for x in locked_points.values()),
                  len(locked_points)))
-    # print(locked_points)
     # hold number of corners rounded
     rounded_corner_count = 0
     # hold number of junctions rounded
@@ -1112,8 +1064,6 @@ def round_signals(board):
                       % (point, layer, wire_count))
             # if only one wire, don't modify it
             if wire_count == 1:
-                # I don't think I need to lock it
-                # locked_points[signal_name].add(point)
                 if super_verbose:
                     print('    - Only one neighbor, skipping')
                 continue
@@ -1319,24 +1269,14 @@ def round_signals(board):
                     polygon.vertices.extend(segments)
                     new_polygons.append(polygon)
                 if traces_in_junctions or not polygons_in_junctions:
-                    # TODO: implement this
-                    for i in range(len(segments) - 1):
-                        break
-                        new_wires.append(Wire(p1=segments[i][0],
-                                              p2=segments[i + 1][0],
-                                              signal=signal_name,
-                                              width=corner_width[(layer, p2)],
-                                              layer=layer,
-                                              curve=segments[i][1]))
-                        # command = ('wire \'%s\' %s (%s %s) %s (%s %s);'
-                        #            % (signal_name,
-                        #               corner_width[(layer, p2)],
-                        #               format_position(segments[i][0].x),
-                        #               format_position(segments[i][0].y),
-                        #               format_angle(segments[i][1]),
-                        #               format_position(segments[i + 1][0].x),
-                        #               format_position(segments[i + 1][0].y)))
-                        ### wires_by_layer[layer].append(command)
+                    for i in range(len(segments)):
+                        new_wire = Wire(segments[i][0],
+                                        segments[(i + 1) % len(segments)][0],
+                                        signal_name,
+                                        corner_width[(layer, p2)],
+                                        layer,
+                                        segments[i][1])
+                        new_wires.append(new_wire)
                 continue
             rounded_corner_count += 1
             for i in range(len(points) - 1):
@@ -1765,22 +1705,12 @@ def get_nearest_point(point, list_of_points):
     return nearest_distance, nearest_point
 
 
-def create_teardrops(board):
+def teardrop_board_vias(board):
     """Teardrop PTHs and vias within the given Board object."""
     if verbose:
         print('\nCreating teardrops in board')
+    # get PTHs by signal
     pths_by_signal = read_pths_by_signal(board)
-    # read in through hole pads
-    # if create_teardrops_on_pths:
-    #     pads = read_pad_pths(filename)
-    #     print('Found %d pads' % len(pads))
-    #     pad_tolerance_mm = 10 * native_resolution_mm
-    #     for pad in pads:
-    #         distance, point = get_nearest_point(pad.origin, wire_points)
-    #         if distance > 0 and distance < pad_tolerance_mm:
-    #             pad.origin = point
-    #     pths += pads
-    #     # add through hold pads to pths
     if verbose:
         print('- Found %d total PTHs in %d signals'
               % (sum(len(x) for x in pths_by_signal), len(pths_by_signal)))
@@ -1984,11 +1914,11 @@ def create_teardrops(board):
 def temp():
     board = Board(board_file)
     round_signals(board)
-    create_teardrops(board)
+    teardrop_board_vias(board)
     backup_file(board_file)
     board.generate_script()
     exit(0)
-    # create_teardrops(board)
+    # teardrop_board_vias(board)
 
 
 temp()
@@ -2018,13 +1948,13 @@ if __name__ == "__main__":
         if option == '--round':
             round_signals(board_filename)
         elif option == '--teardrop':
-            create_teardrops(board_filename)
+            teardrop_board_vias(board_filename)
         else:
             print('ERROR: option \"%s\" not recognized' % option)
 
 
 # snap_wires_to_grid(board_file)
 
-# create_teardrops(board_file)
+# teardrop_board_vias(board_file)
 
 # delete_via_teardrops(board_file)

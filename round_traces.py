@@ -64,6 +64,12 @@ max_trace_deviation_mils = 5
 # when rounding signals, targer inner radius
 target_inner_radius_mils = 100
 
+# if a corner is rounded less than this distance, ignore it
+min_corner_transition_length_mils = 2
+
+# if a junction is rounded less than this distance, ignore it
+min_junction_transition_length_mils = 10
+
 # if True, will output more info than normal
 verbose = True
 
@@ -316,7 +322,6 @@ class Polygon:
             polygon.vertices.append((Point2D(float(vertex.attrib['x']),
                                              float(vertex.attrib['y'])),
                                      curve))
-        print(polygon)
         return polygon
 
     def get_commands(self):
@@ -686,7 +691,6 @@ class Board:
         commands.append('display preset_standard;')
         copper_by_layer = dict()
         for wire in self.wires:
-            print(wire)
             assert type(wire.layer) is str
             if wire.layer not in copper_by_layer:
                 copper_by_layer[wire.layer] = []
@@ -1169,15 +1173,6 @@ def round_signals(board):
             key = (layer, point)
             assert key not in rounded_distance
             rounded_distance[key] = target_distance
-        if False and signal_name == 'N$1':
-            print('\n'.join('%s' % x for x in these_wires))
-            print('these_locked_points=%s' % these_locked_points)
-            print('these_locked_pths=%s' % these_locked_pths)
-            print('adjacent_points=%s' % adjacent_points)
-            print('corner_points=%s' % corner_points)
-            print('junction_points=%s' % junction_points)
-            print('rounded_distance=%s' % rounded_distance)
-            exit(1)
         # look through each segment and find out length used by transitions
         # committed_length[(layer, p1, p2)] = X
         committed_length = dict()
@@ -1209,7 +1204,26 @@ def round_signals(board):
                 rounded_distance[key] *= scale
         # for very small radii, don't round the wire at all
         for key in sorted(rounded_distance.keys()):
-            if rounded_distance[key] < native_resolution_mm * 10:
+            is_corner = len(adjacent_points[key]) == 2
+            distance_mils = rounded_distance[key] / 0.0254
+            if distance_mils == 0.0:
+                del rounded_distance[key]
+            elif rounded_distance[key] < native_resolution_mm * 10:
+                if super_verbose:
+                    print('  - Skipping infinitesimal transition length %g mm'
+                          % rounded_distance[key])
+                del rounded_distance[key]
+            elif (is_corner and
+                  distance_mils < min_corner_transition_length_mils):
+                if super_verbose:
+                    print('  - Skipping corner with small transition length '
+                          '%g mm' % rounded_distance[key])
+                del rounded_distance[key]
+            elif (not is_corner and
+                  distance_mils < min_junction_transition_length_mils):
+                if super_verbose:
+                    print('  - Skipping junction with small transition length '
+                          '%g mm' % rounded_distance[key])
                 del rounded_distance[key]
         # create remaining part of existing straight segments
         for wire in these_wires:

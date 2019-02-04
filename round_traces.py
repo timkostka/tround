@@ -772,7 +772,6 @@ def format_angle(degrees):
     return text
 
 
-# TODO: maybe use this when writing Board scripts
 def wire_command_sort(command):
     """Return a Point2D of the rightmost point in the given wire command."""
     assert '(' in command

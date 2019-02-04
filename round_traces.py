@@ -51,7 +51,6 @@ teardrop_tolerance_mm = 0.1
 
 # target inner radius of teardrops
 teardrop_inner_radius_mm = 0.050 * 25.4
-# teardrop_inner_radius_mm = 0.25 * 25.4
 
 # if True, will create polygons for teardrops to avoid unplated regions
 create_teardrop_polygons = True
@@ -803,9 +802,10 @@ def get_transition_distance(width_mm, p1, p2, p3):
     assert 0 <= theta <= math.pi
     # skip very small angles
     if theta * 360.0 / math.tau < 5.0:
-        print(theta)
         if verbose:
-            print('Info: small angle encountered in get_transition_distance()')
+            print('Info: small angle (%g degrees) encountered in '
+                  'get_transition_distance() near point %s'
+                  % (theta * 360.0 / math.tau, p2))
         return 0.0
     # target radius based on target inner radius
     radius_1 = target_inner_radius_mils * 0.0254 + width_mm / 2.0

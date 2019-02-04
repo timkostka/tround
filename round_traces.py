@@ -883,10 +883,6 @@ def create_teardrop(joining_point,
         p2 = p2 + radius * Point2D(math.cos(end_angle_2), math.sin(end_angle_2))
     else:
         p2 = p2 - radius * Point2D(math.cos(end_angle_2), math.sin(end_angle_2))
-    commands = []
-    # end_angle_1 = math.atan2(via_point - d1 * normal)
-    # end_angle_2 = math.atan2(via_point - d2 * normal)
-    # p3 = via_point
     a1 = (end_angle_1 - start_angle_1) * 360.0 / math.tau
     a1 = ((a1 + 180) % 360) - 180
     a2 = (end_angle_2 - start_angle_2) * 360.0 / math.tau
@@ -1024,8 +1020,6 @@ def round_signals(board):
     rounded_corner_count = 0
     # hold number of junctions rounded
     rounded_junction_count = 0
-    # number of wires which were already curved
-    curved_wire_count = 0
     # hold list of all signals to pass through
     signal_names = set(wire.signal for wire in board.wires)
     # sort wires by signal
@@ -1967,7 +1961,6 @@ def create_teardrops(board):
             new_polygons.extend(teardrop_polygons)
             teardrop_count += 1
             # delete portion of chain between via and junction point
-            layer = chain[0].layer
             chain[:] = chain[wire_index:]
             if alpha == 1.0:
                 chain[:] = chain[1:]
@@ -1995,7 +1988,7 @@ def temp():
     backup_file(board_file)
     board.generate_script()
     exit(0)
-    #create_teardrops(board)
+    # create_teardrops(board)
 
 
 temp()

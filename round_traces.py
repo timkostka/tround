@@ -712,8 +712,9 @@ class Board:
         script_filename = os.path.join(os.path.dirname(self.filename),
                                        'round_traces.scr')
         if verbose:
-            print('- Script generated in board file directory.')
-            print('- To run, open board and run "script %s".'
+            print('\nScript generation successful!')
+            print('\nTO RUN THE SCRIPT, open the board and run the '
+                  'following command:\nscript %s;'
                   % script_filename)
         commands.append('display preset_standard;')
         commands.append('change layer 1;')

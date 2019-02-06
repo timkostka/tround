@@ -4,7 +4,11 @@ import platform
 import ctypes
 import os
 import pickle
+import io
+import builtins
+from contextlib import redirect_stdout
 
+import pyperclip
 import PySimpleGUI as sg
 
 import round_traces
@@ -64,7 +68,7 @@ def process_board(window):
     option = window.FindElement('round_corners').Get() == 1
     round_traces.rounded_corners = option
     option = window.FindElement('round_junctions').Get() == 1
-    round_traces.rounded_junction = option
+    round_traces.rounded_junctions = option
     option = window.FindElement('teardrop_vias').Get() == 1
     round_traces.create_teardrops_on_vias = option
     option = window.FindElement('teardrop_pths').Get() == 1
@@ -73,18 +77,38 @@ def process_board(window):
     filename = window.FindElement('filename').Get()
     layout = [[sg.Text('Performing operations on board file...')],
               [sg.Multiline(key='log', size=(80, 20))],
-              [sg.OK(key='ok'), sg.Cancel(key='cancel')]]
+              [sg.Button('Copy command to clipboard', key='clipboard'),
+               sg.OK(key='ok')]]
     status = sg.Window('Tround GUI').Layout(layout)
     status.Read(timeout=0)
     status.FindElement('log').Update('Reading board file')
     status.FindElement('ok').SetFocus()
     status.Read(timeout=0)
-    board = round_traces.Board(filename)
-    round_traces.round_signals(board)
-    round_traces.teardrop_board_vias(board)
-    board.backup_file()
-    board.generate_script()
+    status.TKroot.grab_set()
+    # temp = builtins.print
+    # builtins.print = sg.EasyPrint
+    f = io.StringIO()
+    with redirect_stdout(f):
+        board = round_traces.Board(filename)
+        status.FindElement('log').Update(f.getvalue())
+        round_traces.round_signals(board)
+        status.FindElement('log').Update(f.getvalue())
+        round_traces.teardrop_board_vias(board)
+        status.FindElement('log').Update(f.getvalue())
+        board.backup_file()
+        status.FindElement('log').Update(f.getvalue())
+        script_filename = board.generate_script()
+        status.FindElement('log').Update(f.getvalue())
+    status.FindElement('log').TKText.see('end')
+    # sg.EasyPrint(f.getvalue())
+    # builtins.print = temp
+    event, values = status.Read()
+    status.TKroot.grab_release()
     status.Close()
+    if event == 'clipboard':
+        pyperclip.copy('script %s;' % script_filename)
+        sg.Popup('Command was copied to the clipboard.',
+                 'To run, open the board in Eagle and run the command.')
 
 
 def run_gui():
@@ -110,7 +134,8 @@ def run_gui():
                sg.FileBrowse(file_types=(("Eagle board files", "*.brd"),
                                          ("All types", "*.*")))],
               [sg.Frame('Options', options_frame)],
-              [sg.OK(key='ok'), sg.Cancel(key='cancel')]]
+              [sg.Button('Generate Script', key='ok'),
+               sg.Button('Exit', key='cancel')]]
     window = sg.Window('Tround GUI').Layout(layout)
     window.Read(timeout=0)
     # load previous options

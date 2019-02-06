@@ -35,6 +35,9 @@ from point2d import Point2D
 # if True, board file will be backed up when creating a script
 backup_board_file = True
 
+# if True, will round corners of traces
+rounded_corners = True
+
 # if True, will also round corners of 3+ wire junctions
 rounded_junctions = True
 
@@ -54,6 +57,9 @@ teardrop_inner_radius_mm = 0.050 * 25.4
 
 # if True, will create polygons for teardrops to avoid unplated regions
 create_teardrop_polygons = True
+
+# if True, will teardrop vias
+create_teardrops_on_vias = True
 
 # if True, will also teardrop plated through holes found in packages
 create_teardrops_on_pths = True
@@ -1116,6 +1122,8 @@ def round_signals(board):
         rounded_distance = dict()
         # get distance to round each corner point
         for (layer, point) in corner_points:
+            if not rounded_corners:
+                break
             # get the two intersecting wires
             local_wires = wires_at_point[(layer, point)]
             assert len(local_wires) == 2
@@ -1521,16 +1529,19 @@ def read_contact_refs(filename):
     return contact_ref
 
 
-def read_pths_by_signal(board):
+def read_pths_by_signal(board, include_vias=True, include_pths=True):
     """Read and return pths by signal for the given board."""
     pths = dict()
     # add vias for each signal
-    for via in board.vias:
-        if via.signal not in pths:
-            pths[via.signal] = []
-        pths[via.signal].append(PTH.from_via(via))
+    if include_vias:
+        for via in board.vias:
+            if via.signal not in pths:
+                pths[via.signal] = []
+            pths[via.signal].append(PTH.from_via(via))
     # look at each package and add PTHs found in library
     for element in board.elements:
+        if not include_pths:
+            break
         # store element origin
         origin = element.origin
         # alias this footprint
@@ -1721,7 +1732,9 @@ def teardrop_board_vias(board):
     if verbose:
         print('\nCreating teardrops in board')
     # get PTHs by signal
-    pths_by_signal = read_pths_by_signal(board)
+    pths_by_signal = read_pths_by_signal(board,
+                                         create_teardrops_on_vias,
+                                         create_teardrops_on_pths)
     if verbose:
         print('- Found %d total PTHs in %d signals'
               % (sum(len(x) for x in pths_by_signal), len(pths_by_signal)))
@@ -1934,10 +1947,6 @@ def temp():
     backup_file(board_file)
     board.generate_script()
     exit(0)
-    # teardrop_board_vias(board)
-
-
-temp()
 
 
 # execute as a script
@@ -1967,10 +1976,3 @@ if __name__ == "__main__":
             teardrop_board_vias(board_filename)
         else:
             print('ERROR: option \"%s\" not recognized' % option)
-
-
-# snap_wires_to_grid(board_file)
-
-# teardrop_board_vias(board_file)
-
-# delete_via_teardrops(board_file)

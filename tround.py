@@ -96,13 +96,13 @@ mm_per_inch = 25.4
 project_directory = r'C:\Users\tdkostk\Documents\eagle\projects'
 
 # project and filename to modify
-# board_file = r'\round_traces\round_traces_test.brd'
+# board_file = r'\tround\round_traces_test.brd'
 # board_file = r'\teardrop_vias\teardrop_test.brd'
 # board_file = r'\kct-tester\sandia-cable-tester-rev5-rounded.brd'
 # board_file = r'\kct-tester\sandia-cable-tester-rev5.brd'
 # board_file = r'\sandia_cable_tester\sandia-cable-tester-rev5.brd'
 # board_file = r'\sandia_cable_tester\sandia-cable-tester-rev5-round.brd'
-# board_file = r'\round_traces\round_traces_test_2.brd'
+# board_file = r'\tround\round_traces_test_2.brd'
 # board_file = r'\sct-adapters\sct-terminal-block-6.brd'
 # board_file = r'\sct-adapters\sct-terminal-block-6-round.brd'
 # board_file = r'\sct-adapters\sct-bnc-male.brd'
@@ -710,7 +710,7 @@ class Board:
             commands.extend(polygon.get_commands())
         # create script filename
         script_filename = os.path.join(os.path.dirname(self.filename),
-                                       'round_traces.scr')
+                                       'ttround.scr')
         if verbose:
             print('\nScript generation successful!')
             print('\nTO RUN THE SCRIPT, open the board and run the '

@@ -2,11 +2,11 @@
 This script modifies an eagle board file by rounding corners of traces.
 
 Usage:
-> python round_traces.py [options] [board_filename]
+> python tround.py [options] [board_filename]
 
 For example:
-> python round_traces.py --teardrop /path/to/board.brd
-> python round_traces.py --round /path/to/board.brd
+> python tround.py --teardrop /path/to/board.brd
+> python tround.py --round /path/to/board.brd
 
 """
 
@@ -749,11 +749,7 @@ def read_libraries(filename):
 
 
 def read_elements(filename):
-    """
-    Return the component placements within the file.
-
-    [('library', 'footprint', x, y, mirror, rotation)]
-    """
+    """Return the component placements within the file."""
     # tree = ElementTree.parse(filename)
     # root = tree.getroot()
     placements = [Element(element)

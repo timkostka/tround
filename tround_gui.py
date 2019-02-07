@@ -1,17 +1,16 @@
-"""This provides a GUI interface for round_traces.py."""
+"""This provides a GUI interface for tround.py."""
 
 import platform
 import ctypes
 import os
 import pickle
 import io
-import builtins
 from contextlib import redirect_stdout
 
 import pyperclip
 import PySimpleGUI as sg
 
-import round_traces
+import tround
 
 
 def set_gui_colors():
@@ -27,7 +26,7 @@ def set_gui_colors():
     print('Windows release is %s.' % (platform.release()))
     if int(platform.release()) >= 8:
         print('Registering DPI awareness.')
-        ctypes.windll.shcore.SetProcessDpiAwareness(True)
+        # ctypes.windll.shcore.SetProcessDpiAwareness(True)
 
 
 def get_settings_filename():
@@ -66,13 +65,13 @@ def process_board(window):
     """Perform the operations on the given file."""
     # set options based on checkboxes
     option = window.FindElement('round_corners').Get() == 1
-    round_traces.rounded_corners = option
+    tround.rounded_corners = option
     option = window.FindElement('round_junctions').Get() == 1
-    round_traces.rounded_junctions = option
+    tround.rounded_junctions = option
     option = window.FindElement('teardrop_vias').Get() == 1
-    round_traces.create_teardrops_on_vias = option
+    tround.create_teardrops_on_vias = option
     option = window.FindElement('teardrop_pths').Get() == 1
-    round_traces.create_teardrops_on_pths = option
+    tround.create_teardrops_on_pths = option
     # read board filename
     filename = window.FindElement('filename').Get()
     layout = [[sg.Text('Performing operations on board file...')],
@@ -89,11 +88,11 @@ def process_board(window):
     # builtins.print = sg.EasyPrint
     f = io.StringIO()
     with redirect_stdout(f):
-        board = round_traces.Board(filename)
+        board = tround.Board(filename)
         status.FindElement('log').Update(f.getvalue())
-        round_traces.round_signals(board)
+        tround.round_signals(board)
         status.FindElement('log').Update(f.getvalue())
-        round_traces.teardrop_board_vias(board)
+        tround.teardrop_board_vias(board)
         status.FindElement('log').Update(f.getvalue())
         board.backup_file()
         status.FindElement('log').Update(f.getvalue())

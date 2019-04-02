@@ -74,7 +74,7 @@ target_inner_radius_mils = 100
 min_corner_transition_length_mils = 2
 
 # if a junction is rounded less than this distance, ignore it
-min_junction_transition_length_mils = 10
+min_junction_transition_length_mils = 2
 
 # if True, will output more info than normal
 verbose = True
@@ -636,27 +636,6 @@ class Element:
                    self.mirrored))
 
 
-def simplify_commands(commands):
-    """Remove unnecessary commands from the list of commands."""
-    parameters = dict()
-    # hold unnecessary command lines
-    duplicates = []
-    for i, command in enumerate(commands):
-        command = commands[i].lower()
-        if not command.startswith('change '):
-            continue
-        words = command.split(maxsplit=2)
-        if len(words) < 3:
-            continue
-        if words[1] in parameters and parameters[words[1]] == words[2]:
-            duplicates.append(i)
-        else:
-            parameters[words[1]] = words[2]
-    # delete those lines
-    for i in reversed(duplicates):
-        del commands[i]
-
-
 class Board:
     """A Board holds information within a single Eagle BRD file."""
 
@@ -728,6 +707,27 @@ class Board:
         with open(script_filename, 'w') as f:
             f.write('\n'.join(commands))
         return script_filename
+
+
+def simplify_commands(commands):
+    """Remove unnecessary commands from the list of commands."""
+    parameters = dict()
+    # hold unnecessary command lines
+    duplicates = []
+    for i, command in enumerate(commands):
+        command = commands[i].lower()
+        if not command.startswith('change '):
+            continue
+        words = command.split(maxsplit=2)
+        if len(words) < 3:
+            continue
+        if words[1] in parameters and parameters[words[1]] == words[2]:
+            duplicates.append(i)
+        else:
+            parameters[words[1]] = words[2]
+    # delete those lines
+    for i in reversed(duplicates):
+        del commands[i]
 
 
 def read_libraries(filename):
@@ -1789,11 +1789,33 @@ def teardrop_board_vias(board):
         # store wire chain
         wire_chains = []
         # go through each wire and start wire chains from each PTH
+        print('  - Found %d mid points' % len(mid_points))
+        #if signal == 'W1':
+        #    print(pths_at_point)
         for wire in wires_by_signal[signal]:
             for p in [wire.p1, wire.p2]:
                 # point = (wire.layer, p)
-                if p not in pths_at_point:
+                # find closest point
+                if not pths_at_point:
                     continue
+                if p not in pths_at_point:
+                    closest_pth = None
+                    closest_distance = float('inf')
+                    for point, pth in pths_at_point.items():
+                        this_distance = p.distance_to(point)
+                        if this_distance < closest_distance:
+                            closest_distance = this_distance
+                            closest_pth = pth
+                    #dist_to_pth = min(
+                    #    p.distance_to(x) for x in pths_at_point.keys())
+                    if closest_distance > 0.1 * native_resolution_mm:
+                        continue
+                    print('Found PTH a small distance of %g away' % closest_distance)
+                    pths_at_point[p] = closest_pth
+                    #if signal == 'W1' and p not in mid_points:
+                    #    print('No PTH or midpoint at point %s' % p)
+                    #    print('Closest = %g' % dist_to_pth)
+                    #continue
                 used_wires.add(wire)
                 # start chain with this wire, set p1 to the via location
                 this_chain = [wire]

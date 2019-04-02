@@ -26,7 +26,7 @@ def set_gui_colors():
     print('Windows release is %s.' % (platform.release()))
     if int(platform.release()) >= 8:
         print('Registering DPI awareness.')
-        # ctypes.windll.shcore.SetProcessDpiAwareness(True)
+        ctypes.windll.shcore.SetProcessDpiAwareness(True)
 
 
 def get_settings_filename():

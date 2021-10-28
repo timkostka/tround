@@ -8,6 +8,30 @@ For example:
 > python tround.py --teardrop /path/to/board.brd
 > python tround.py --round /path/to/board.brd
 
+
+How it works to round traces:
+
+* Read in all wires in the board file.
+* Read in all PTHs in the board file.
+* Read in all PTHs and SMDs (pads) within components in the board file.
+Establish fixed points:
+* Rounded wires are not modified and their endpoints are marked as fixed.
+* Locations of PTHs are set as fixed
+* Locations of SMDs are set as fixed (and axis information recorded).
+Find corner and junction points:
+* Non-fixed points where 2 wires meet are marked as corners.
+* Non-fixed points where 3+ wires meet are marked as junctions.
+Find wire chains:
+*
+Don't round wires near SMD pads:
+* We want to avoid the situation where a wire is curved immediately so that it
+  intersects other nearby SMDs. Rounding the wire within the SMD pad is not
+  desired so, if the wire is long enough, we break the wire in two and fix the
+  portion nearest the SMD pad.
+
+
+
+
 """
 
 # When a file is loaded, first the objects are loaded into memory as follows:
@@ -53,7 +77,7 @@ traces_in_junctions = True
 teardrop_tolerance_mm = 0.1
 
 # target inner radius of teardrops
-teardrop_inner_radius_mm = 0.050 * 25.4
+teardrop_inner_radius_mm = 0.080 * 25.4
 
 # if True, will create polygons for teardrops to avoid unplated regions
 create_teardrop_polygons = True
@@ -65,10 +89,12 @@ create_teardrops_on_vias = True
 create_teardrops_on_pths = True
 
 # when rounding signals, maximum deviation from the original copper
-max_trace_deviation_mils = 5
+max_trace_deviation_mils = 10
+max_trace_deviation_mils = 10
 
 # when rounding signals, targer inner radius
-target_inner_radius_mils = 100
+target_inner_radius_mils = 150
+target_inner_radius_mils = 150
 
 # if a corner is rounded less than this distance, ignore it
 min_corner_transition_length_mils = 2
@@ -107,9 +133,12 @@ project_directory = r'C:\Users\tdkostk\Documents\eagle\projects'
 # board_file = r'\sct-adapters\sct-terminal-block-6-round.brd'
 # board_file = r'\sct-adapters\sct-bnc-male.brd'
 # board_file = r'\micro_ohmmeter\micro_ohmmeter_rev5.brd'
-board_file = r'\octoversity\octoversity_rev3.brd'
+# board_file = r'\octoversity\octoversity_rev3.brd'
+board_file = r'\msp430_signal_analysis\test_round_board.brd'
 
 board_file = project_directory + board_file
+
+board_file = r"C:\Users\tdkostk\Documents\msp430_repo\test_board_design\msp430_function_board_rev2.brd"
 
 
 class SMD:
@@ -503,6 +532,15 @@ class Wire:
         _, radius, _ = self.get_curve_points()
         return radius * abs(self.curve)
 
+    def get_angle(self):
+        """Return the angle of the wire in degrees."""
+        assert self.curve == 0.0
+        assert self.get_length() > 0.0
+        angle = self.p1.angle_to(self.p2) * 180.0 / math.pi % 360.0
+        # snap to 3 decimal places
+        angle = round(angle, 3) % 360.0
+        return angle
+
     def get_command(self):
         """Return the command to recreate the wire."""
         if self.curve == 0.0:
@@ -673,7 +711,7 @@ class Board:
         commands.append('group all;')
         commands.append('ripup (>0 0);')
         commands.append('display none;')
-        commands.append('display preset_standard;')
+        commands.append('display all;')
         copper_by_layer = dict()
         for wire in self.wires:
             assert type(wire.layer) is str
@@ -695,7 +733,7 @@ class Board:
             print('\nTO RUN THE SCRIPT, open the board and run the '
                   'following command:\nscript %s;'
                   % script_filename)
-        commands.append('display preset_standard;')
+        commands.append('display all;')
         commands.append('change layer 1;')
         commands.append('grid last;')
         commands.append('optimize;')
@@ -956,6 +994,18 @@ def backup_file(filename):
     print('WARNING: Backup file limit exceeded.  No backup created.')
 
 
+def get_smd_length(wire, axes):
+    """Return the length required to escape the given SMD axes."""
+    if wire.get_length() == 0.0:
+        return 0.0
+    angle = wire.get_angle() % 180.0
+    if angle == axes[2]:
+        return axes[0]
+    elif (angle + 90) % 180.0 == axes[2]:
+        return axes[1]
+    return 0.0
+
+
 def round_signals(board):
     """Round signals within the given Board object."""
     if verbose:
@@ -969,8 +1019,9 @@ def round_signals(board):
               % (sum(len(x) for x in locked_pths.values()),
                  len(locked_pths)))
     # hold points which should not be moved for each signal
-    # locked_points[signal_name] = {(layer_name, Point2D), ...}
+    # locked_points[signal_name] = {(layer_name, Point2D, axes), ...}
     locked_points = read_smds_by_signal(board)
+    print(locked_points)
     if verbose:
         print('- Found %d SMD pads for %d signals'
               % (sum(len(x) for x in locked_points.values()),
@@ -983,16 +1034,50 @@ def round_signals(board):
     signal_names = set(wire.signal for wire in board.wires)
     # sort wires by signal
     wires_by_signal = dict()
-    for signal in signal_names:
-        wires_by_signal[signal] = []
+    for signal_name in signal_names:
+        wires_by_signal[signal_name] = []
     for wire in board.wires:
         wires_by_signal[wire.signal].append(wire)
+    # create set of points used by wires in each signal
+    signal_wire_points = dict()
+    for signal_name, wires in wires_by_signal.items():
+        signal_wire_points[signal_name] = set()
+        for wire in wires:
+            signal_wire_points[signal_name].add(wire.p1)
+            signal_wire_points[signal_name].add(wire.p2)
+    # TODO: snap SMD points to nearby wires to avoid roundoff issues
+    new_locked_points = dict()
+    for signal_name in signal_names:
+        new_locked_points[signal_name] = set()
+        this_locked_points = locked_points[signal_name]
+        for value in this_locked_points:
+            this_point = value[1]
+            if this_point in signal_wire_points:
+                new_locked_points[signal_name].add(value)
+                continue
+            closest_distance = float('inf')
+            closest_point = None
+            for point in signal_wire_points[signal_name]:
+                distance = this_point.distance_to(point)
+                if distance < closest_distance:
+                    closest_point = point
+                    closest_distance = distance
+            if closest_distance < 3 * native_resolution_mm:
+                print("Snapped SMD point to wire")
+                value = (value[0], closest_point, value[2])
+            new_locked_points[signal_name].add(value)
+    locked_points = new_locked_points
+    del new_locked_points
     # hold list of wires to draw to replace all wires corrently on board
     new_wires = []
     # hold list of new polygons
     new_polygons = []
     # loop through each signal
+    assert r"N$7" in signal_names
     for signal_name in sorted(signal_names):
+        if signal_name == r"N$7":
+            print("ASDFASDFASDFASDFA")
+            pass
         if super_verbose:
             print('- Rounding wires on signal "%s"' % signal_name)
         # alias locked pths and points
@@ -1035,16 +1120,16 @@ def round_signals(board):
         # hold wire widths at corner
         # corner_width[(layer, point)] = X
         corner_width = dict()
-        # for wires of different widths, make the corner a locked point
         # for wires which have the same start and end point, make it locked
         # for curved wires, make both ends a locked point
+        # for wires of different widths, make the corner a locked point
         for wire in these_wires:
             if wire.p1 == wire.p2:
-                locked_points[signal_name].add((wire.layer, wire.p1))
+                these_locked_points.add((wire.layer, wire.p1, (0, 0, 0)))
                 continue
             if wire.curve != 0.0:
-                locked_points[signal_name].add((wire.layer, wire.p1))
-                locked_points[signal_name].add((wire.layer, wire.p2))
+                these_locked_points.add((wire.layer, wire.p1, (0, 0, 0)))
+                these_locked_points.add((wire.layer, wire.p2, (0, 0, 0)))
                 continue
             for point in [wire.p1, wire.p2]:
                 key = (wire.layer, point)
@@ -1052,7 +1137,7 @@ def round_signals(board):
                     corner_width[key] = wire.width
                 else:
                     if corner_width[key] != wire.width:
-                        locked_points[signal_name].add(key)
+                        these_locked_points.add((wire.layer, point, (0, 0, 0)))
         # hold corner points (2 wires joining)
         corner_points = set()
         # hold junction points (3+ wires intersecting)
@@ -1085,7 +1170,9 @@ def round_signals(board):
                 continue
             # get distance to nearest locked point or pth
             dist = float('inf')
-            for locked_layer, locked_point in these_locked_points:
+            #print(these_locked_points)
+            for locked_layer, locked_point, _ in these_locked_points:
+                #print(locked_layer, locked_point)
                 if locked_layer != layer:
                     continue
                 this_dist = point.distance_to(locked_point)
@@ -1096,7 +1183,7 @@ def round_signals(board):
                 if this_dist < dist:
                     dist = this_dist
             # if distance to nearest locked point/pth is small, skip this point
-            if dist < 5 * native_resolution_mm:
+            if dist < 3 * native_resolution_mm:
                 if super_verbose:
                     if dist == 0.0:
                         print('    - Point is a locked PTH/point')
@@ -1157,6 +1244,7 @@ def round_signals(board):
             wire_spokes = [(angle, p, wire)
                            for (angle, p), wire in zip(wire_angles,
                                                        local_wires)]
+            print(wire_spokes[:5])
             wire_spokes.sort()
             last_wire = list(wire_spokes[0])
             last_wire[0] += math.tau
@@ -1175,6 +1263,35 @@ def round_signals(board):
             key = (layer, point)
             assert key not in rounded_distance
             rounded_distance[key] = target_distance
+        # adjust SMD information for quicker access
+        smd_axes = dict()
+        # locked_points[signal_name] = {(layer_name, Point2D, axes), ...}
+        for layer, point, axes in locked_points[signal_name]:
+            key = (layer, point)
+            #assert key not in smd_axes
+            smd_axes[key] = axes
+        # for wires exiting an SMD pad, adjust rounded distance so it isn't
+        # rounded within the SMD pad
+        if signal_name == r"N$7":
+            print("ASDFASDFASDFASDFA")
+        for key, value in rounded_distance.items():
+            layer, point = key
+            assert key in wires_at_point
+            for wire in wires_at_point[key]:
+                other_point = wire.get_other_point(point)
+                other_key = (layer, other_point)
+                if other_key in smd_axes:
+                    axes = smd_axes[other_key]
+                    wire_length = wire.get_length()
+                    allowed_distance = wire_length - get_smd_length(wire, axes)
+                    if allowed_distance < 0.0:
+                        allowed_distance = 0.0
+                    if value > allowed_distance:
+                        if super_verbose:
+                            print("    - Adjusted rounding distance to "
+                                  "avoid SMD pad")
+                        rounded_distance[key] = allowed_distance
+                        value = allowed_distance
         # look through each segment and find out length used by transitions
         # committed_length[(layer, p1, p2)] = X
         committed_length = dict()
@@ -1561,7 +1678,16 @@ def read_pths_by_signal(board, include_vias=True, include_pths=True):
 
 
 def read_smds_by_signal(board):
-    """Read and return SMD pads by signal for the given board."""
+    """
+    Read and return SMD pads by signal for the given board.
+
+    Returned value is a dictionary with a key for each signal name. Each
+    dictionary value is a list of the form (layer, point, axes).
+    * layer: string value of the layer name
+    * point: Point2D value of the center of the SMD pad.
+    * axes: triplet of (width, height, angle) where angle is the angle of the
+            width axis
+    """
     points = dict()
     # look at each package and add PTHs found in library
     for element in board.elements:
@@ -1571,6 +1697,11 @@ def read_smds_by_signal(board):
         footprint = board.libraries[element.library][element.footprint]
         # add an entry for each pad in the footprint
         for pad in footprint.smds:
+            # set up original axes
+            axes = (float(pad.dx) / 2,
+                    float(pad.dy) / 2,
+                    (pad.rot + element.rotation) % 180.0)
+            # get center point
             point = copy.copy(pad.origin)
             if element.rotation != 0:
                 point.rotate(element.rotation * math.tau / 360.0)
@@ -1581,7 +1712,7 @@ def read_smds_by_signal(board):
                 layer = '1'
             if (element.name, pad.name) in board.contact_refs:
                 signal = board.contact_refs[(element.name, pad.name)]
-                this_point = (layer, snapped_point(origin + point))
+                this_point = (layer, snapped_point(origin + point), axes)
                 if signal not in points:
                     points[signal] = set()
                 points[signal].add(this_point)
@@ -1970,6 +2101,8 @@ def temp():
 
 # execute as a script
 if __name__ == "__main__":
+    temp()
+    exit(0)
     options = sys.argv
     # this_script_filename = options[0]
     del options[0]

@@ -87,7 +87,7 @@ def process_board(window):
     # temp = builtins.print
     # builtins.print = sg.EasyPrint
     f = io.StringIO()
-    with redirect_stdout(f):
+    if 1: #with redirect_stdout(f):
         board = tround.Board(filename)
         status.FindElement('log').Update(f.getvalue())
         tround.round_signals(board)
